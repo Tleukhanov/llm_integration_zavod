@@ -39,7 +39,7 @@ class FeatureExtractor:
         text_parts = [s.text.strip() for s in segments]
         text = " ".join(text_parts)
         lower_text = text.lower()
-        raw_words = re.findall(r"[a-zA-Z']+", lower_text)
+        raw_words = re.findall(r"[\w']+", lower_text)
         word_count = len(raw_words)
 
         start_time = segments[0].start

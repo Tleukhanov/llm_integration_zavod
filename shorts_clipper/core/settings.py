@@ -43,6 +43,7 @@ class Settings:
     whisper_model: str = "tiny.en"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    whisper_language: str | None = None
     models_dir: Path = Path("models")
     output_dir: Path = Path("outputs")
     cache_dir: Path = Path(".cache/shorts-clipper")
@@ -58,6 +59,7 @@ class Settings:
     r2_secret_access_key: str | None = None
     r2_bucket_name: str | None = None
     publish_platforms: list[str] = field(default_factory=lambda: ["youtube", "instagram"])
+    subtitle_langs: list[str] = field(default_factory=lambda: ["ru", "en"])
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -103,6 +105,9 @@ class Settings:
         )
         publish_platforms = [p.strip() for p in platforms_raw.split(",") if p.strip()]
 
+        subtitle_langs_raw = _env("SHORTS_SUBTITLE_LANGS", file_values, "ru,en") or "ru,en"
+        subtitle_langs = [p.strip() for p in subtitle_langs_raw.split(",") if p.strip()]
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -125,6 +130,7 @@ class Settings:
             whisper_model=_env("SHORTS_WHISPER_MODEL", file_values, "tiny.en") or "tiny.en",
             whisper_device=whisper_device,
             whisper_compute_type=whisper_compute_type,
+            whisper_language=_env("SHORTS_WHISPER_LANGUAGE", file_values),
             models_dir=Path(_env("SHORTS_MODELS_DIR", file_values, "models") or "models"),
             output_dir=Path(_env("SHORTS_OUTPUT_DIR", file_values, "outputs") or "outputs"),
             cache_dir=Path(
@@ -142,4 +148,5 @@ class Settings:
             r2_secret_access_key=_env("R2_SECRET_ACCESS_KEY", file_values),
             r2_bucket_name=_env("R2_BUCKET_NAME", file_values),
             publish_platforms=publish_platforms,
+            subtitle_langs=subtitle_langs,
         )

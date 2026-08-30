@@ -22,6 +22,37 @@ from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 
 log = logging.getLogger(__name__)
 
+# Words that get highlighted in captions (EN + RU). Compared against
+# uppercased word tokens, so Russian entries are written uppercase.
+EMOTIONAL_TRIGGERS = {
+    "NEVER",
+    "INSANE",
+    "BRO",
+    "NO",
+    "WAY",
+    "LISTEN",
+    "WAIT",
+    "CRAZY",
+    "DESTROYED",
+    "CRASHOUT",
+    "WTF",
+    "OMG",
+    "TRUTH",
+    "SECRET",
+    "UNBELIEVABLE",
+    "SHOCKING",
+    "AURA",
+    "ВАУ",
+    "БЛИН",
+    "ОФИГЕТЬ",
+    "НЕВЕРОЯТНО",
+    "СМОТРИ",
+    "СТОП",
+    "СУПЕР",
+    "УЖАСНО",
+    "КОШМАР",
+}
+
 # ---------------------------------------------------------------------------
 # ASS file generation
 # ---------------------------------------------------------------------------
@@ -243,26 +274,6 @@ def generate_ass_file(
         "&H00FF00BF&",  # Electric Purple
     ]
 
-    emotional_triggers = {
-        "NEVER",
-        "INSANE",
-        "BRO",
-        "NO",
-        "WAY",
-        "LISTEN",
-        "WAIT",
-        "CRAZY",
-        "DESTROYED",
-        "CRASHOUT",
-        "WTF",
-        "OMG",
-        "TRUTH",
-        "SECRET",
-        "UNBELIEVABLE",
-        "SHOCKING",
-        "AURA",
-    }
-
     for chunk in chunks:
         start = _seconds_to_ass_time(chunk["start"])
         end = _seconds_to_ass_time(chunk["end"])
@@ -274,7 +285,7 @@ def generate_ass_file(
         colored_words = []
         for w in words:
             clean_word = "".join(c for c in w if c.isalpha())
-            if clean_word in emotional_triggers:
+            if clean_word in EMOTIONAL_TRIGGERS:
                 color = random.choice(highlight_colors)
                 colored_words.append(f"{{\\c{color}}}{w}{{\\c&H00F2F2F2&}}")
             else:
