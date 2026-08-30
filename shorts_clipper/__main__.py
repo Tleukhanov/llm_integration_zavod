@@ -140,6 +140,17 @@ def _cmd_repair_metadata(args: argparse.Namespace, settings: Settings) -> int:
     return run_repair()
 
 
+def _cmd_cleanup(args: argparse.Namespace, settings: Settings) -> int:  # noqa: ARG001
+    from shorts_clipper.core.cleanup import run_cleanup
+
+    counts = run_cleanup(settings)
+    print(
+        f"Cleanup done: archived={counts['archived']} deleted_old={counts['deleted_old']} "
+        f"deleted_excess={counts['deleted_excess']} deleted_stray={counts['deleted_stray']}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m shorts_clipper",
@@ -252,6 +263,9 @@ def build_parser() -> argparse.ArgumentParser:
     # ── repair-metadata ───────────────────────────────────────────────────────────────
     sub.add_parser("repair-metadata", help="Repair clips missing metadata.")
 
+    # ── cleanup ────────────────────────────────────────────────────────────────────────
+    sub.add_parser("cleanup", help="Archive published clips and prune old output files.")
+
     return parser
 
 
@@ -268,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         "scout": _cmd_scout,
         "web": _cmd_web,
         "repair-metadata": _cmd_repair_metadata,
+        "cleanup": _cmd_cleanup,
     }
     return dispatch[args.command](args, settings)
 

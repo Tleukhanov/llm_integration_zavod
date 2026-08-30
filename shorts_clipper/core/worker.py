@@ -17,7 +17,9 @@ from datetime import datetime
 from pathlib import Path
 
 from shorts_clipper.core.logging import configure_logging
+from shorts_clipper.core.cleanup import cleanup_worker
 from shorts_clipper.core.queue import JobQueue, JobStatus
+from shorts_clipper.core.scheduler import publish_scheduler_loop
 from shorts_clipper.core.settings import Settings
 from shorts_clipper.pipeline.runner import run, run_autopilot
 from shorts_clipper.providers.gemini import GeminiProvider
@@ -199,6 +201,24 @@ def run_worker() -> None:
     # Launch heartbeat thread
     heartbeat_thread = threading.Thread(target=heartbeat_thread_loop, daemon=True)
     heartbeat_thread.start()
+
+    stop_event = threading.Event()
+
+    # Launch disk cleanup thread
+    cleanup_thread = threading.Thread(
+        target=cleanup_worker,
+        args=(settings, 86400, stop_event),
+        daemon=True,
+    )
+    cleanup_thread.start()
+
+    # Launch publish scheduler thread
+    scheduler_thread = threading.Thread(
+        target=publish_scheduler_loop,
+        args=(settings, settings.publish_interval_seconds, stop_event),
+        daemon=True,
+    )
+    scheduler_thread.start()
 
     def cancellation_monitor_thread_loop() -> None:
         """Continuously monitors the active job status and terminates subprocesses if cancelled."""

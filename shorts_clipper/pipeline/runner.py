@@ -464,28 +464,50 @@ def run(
                     if progress_callback:
                         progress_callback(95)
                     log.info("Publishing Clip %d to platforms: %s", idx, platforms)
+
+                    if not meta.get("title") or not meta.get("description"):
+                        log.error(
+                            "❌ REFUSING TO PUBLISH clip %d: metadata is missing. "
+                            "Title=%r, Description=%r",
+                            idx,
+                            meta.get("title"),
+                            meta.get("description"),
+                        )
+                        meta["publish_status"] = "failed"
+                        meta["publish_error"] = "Upload blocked: metadata generation failed."
+                        json_path.write_text(
+                            json.dumps(meta, indent=2, ensure_ascii=False),
+                            encoding="utf-8",
+                        )
+                        continue
+
+                    if settings.publish_at:
+                        from shorts_clipper.core.scheduler import enqueue_publish
+
+                        enqueue_publish(
+                            str(current_output_path),
+                            meta,
+                            platforms,
+                            settings.publish_at,
+                        )
+                        meta["publish_status"] = "scheduled"
+                        json_path.write_text(
+                            json.dumps(meta, indent=2, ensure_ascii=False),
+                            encoding="utf-8",
+                        )
+                        log.info(
+                            "Clip %d queued for scheduled publish at %s",
+                            idx,
+                            settings.publish_at,
+                        )
+                        continue
+
                     try:
                         meta["publish_status"] = "uploading"
                         json_path.write_text(
                             json.dumps(meta, indent=2, ensure_ascii=False),
                             encoding="utf-8",
                         )
-
-                        if not meta.get("title") or not meta.get("description"):
-                            log.error(
-                                "❌ REFUSING TO PUBLISH clip %d: metadata is missing. "
-                                "Title=%r, Description=%r",
-                                idx,
-                                meta.get("title"),
-                                meta.get("description"),
-                            )
-                            meta["publish_status"] = "failed"
-                            meta["publish_error"] = "Upload blocked: metadata generation failed."
-                            json_path.write_text(
-                                json.dumps(meta, indent=2, ensure_ascii=False),
-                                encoding="utf-8",
-                            )
-                            continue
 
                         clip_metadata = ClipMetadata(
                             title=meta["title"],
