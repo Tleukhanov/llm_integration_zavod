@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShortClipper — AI Video Clipper Console</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    
+
+    <link rel="stylesheet" href="/ui/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        
+        <!-- Sidebar -->
+        <div class="sidebar" id="sidebar">
+            <button class="sidebar-toggle" onclick="toggleSidebar()">
+                <i class="fa-solid fa-angle-left" id="toggle-icon"></i>
+            </button>
+            
+            <div class="brand-container">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-clapperboard" style="color: var(--gold); font-size: 1.15rem; text-shadow: 0 0 10px rgba(201,168,76,0.6);"></i>
+                </div>
+                <div class="brand-name">
+                    <span style="color: var(--gold); font-weight: 900; letter-spacing: 0.05em;">SHORTS</span>
+                    <span style="color: var(--cyan); font-weight: 900; letter-spacing: 0.05em;">CLIPPER</span>
+                </div>
+            </div>
+            
+            <div class="nav-menu">
+                <div class="nav-item active" onclick="switchView('view-autopilot')" id="nav-item-autopilot" title="Autopilot">
+                    <i class="fa-solid fa-rocket"></i>
+                    <span>Autopilot</span>
+                </div>
+                <div class="nav-item" onclick="switchView('view-clipper')" id="nav-item-clipper" title="Clipper">
+                    <i class="fa-solid fa-scissors"></i>
+                    <span>Clipper</span>
+                </div>
+                <div class="nav-item" onclick="switchView('view-library')" id="nav-item-library" title="Library">
+                    <i class="fa-solid fa-video"></i>
+                    <span>Library</span>
+                </div>
+                <div class="nav-item" onclick="switchView('view-watchdog')" id="nav-item-watchdog" title="Watchdog">
+                    <i class="fa-solid fa-eye"></i>
+                    <span>Watchdog</span>
+                </div>
+                <div class="nav-item" onclick="toggleAssistantDrawer(true)" id="nav-item-cowriter" title="Co-Writer">
+                    <i class="fa-solid fa-brain"></i>
+                    <span>Co-Writer</span>
+                </div>
+            </div>
+
+            <!-- Bottom Section of Sidebar -->
+            <div class="sidebar-bottom" style="display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid var(--wire); padding-top: 1.25rem; margin-top: auto; transition: all 0.3s ease;">
+                <!-- YouTube Account Connection Row -->
+                <div id="sidebar-yt-connection">
+                    <!-- Populated dynamically -->
+                </div>
+                
+                <!-- Instagram Account Connection Row -->
+                <div id="sidebar-ig-connection">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- Settings Button -->
+                <div class="nav-item nav-settings-btn" id="nav-item-settings" onclick="switchView('view-settings')" title="Settings" style="margin: 0; display: flex; align-items: center;">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>Settings</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            
+            <!-- Mobile Navigation Header -->
+            <div class="mobile-header">
+                <button class="hamburger-btn" onclick="toggleMobileSidebar(true)">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div class="mobile-brand">
+                    <i class="fa-solid fa-clapperboard" style="color: var(--gold); font-size: 1rem;"></i>
+                    <span style="color: var(--gold); font-weight: 900;">SHORTS</span>
+                    <span style="color: var(--cyan); font-weight: 900;">CLIPPER</span>
+                </div>
+                <div style="width: 36px;"></div> <!-- Spacer to center -->
+            </div>
+
+            <!-- Statistics Bar -->
+            <div class="stats-bar">
+                <div class="stat-card">
+                    <span class="stat-label">Autopilot:</span>
+                    <span class="stat-value" id="stat-autopilot-count">Ready</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Clips:</span>
+                    <span class="stat-value" id="stat-total-clips">0</span>
+                </div>
+            </div>
+            
+            <!-- Central Activity Status -->
+            <div id="activity-status-container" style="display: flex; flex-direction: column; align-items: center; margin-bottom: 1.25rem; text-align: center;">
+                <span id="activity-status-message" style="font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; color: var(--ghost); min-height: 1.75rem; transition: opacity 0.15s ease, transform 0.15s ease; opacity: 1; transform: translateY(0);">Ready.</span>
+            </div>
+
+            <!-- Pipeline Stage Badges -->
+            <div class="stage-pipeline" id="progress-pipeline-bar">
+                <div class="stage-step active" id="step-idle">
+                    <div class="stage-icon"><i class="fa-solid fa-hourglass"></i></div>
+                    <div class="stage-label">Idle</div>
+                </div>
+                <div class="pipeline-bar" id="bar-scouting"></div>
+                <div class="stage-step" id="step-scouting">
+                    <div class="stage-icon"><i class="fa-solid fa-satellite-dish"></i></div>
+                    <div class="stage-label">Scouting</div>
+                </div>
+                <div class="pipeline-bar" id="bar-downloading"></div>
+                <div class="stage-step" id="step-downloading">
+                    <div class="stage-icon"><i class="fa-solid fa-cloud-arrow-down"></i></div>
+                    <div class="stage-label">Downloading</div>
+                </div>
+                <div class="pipeline-bar" id="bar-transcribing"></div>
+                <div class="stage-step" id="step-transcribing">
+                    <div class="stage-icon"><i class="fa-solid fa-brain"></i></div>
+                    <div class="stage-label">Transcribing</div>
+                </div>
+                <div class="pipeline-bar" id="bar-rendering"></div>
+                <div class="stage-step" id="step-rendering">
+                    <div class="stage-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                    <div class="stage-label">Rendering</div>
+                </div>
+                <div class="pipeline-bar" id="bar-publishing"></div>
+                <div class="stage-step" id="step-publishing">
+                    <div class="stage-icon"><i class="fa-brands fa-youtube"></i></div>
+                    <div class="stage-label">Publishing</div>
+                </div>
+            </div>
+            
+            <!-- Active Task Cancel Container -->
+            <div id="active-job-cancel-container" style="display: none; justify-content: flex-end; margin-top: 0.75rem; margin-bottom: 1.25rem;">
+                <button class="btn btn-red btn-mini" id="btn-cancel-job" onclick="cancelCurrentJob()" style="display: inline-flex; align-items: center; gap: 6px;">
+                    <i class="fa-solid fa-circle-stop"></i> Cancel Active Task
+                </button>
+            </div>
+            
+            <!-- Uploading Detail Bar Container (Thin and Classic) -->
+            <div id="active-upload-progress-container" style="display: none; flex-direction: column; gap: 0.35rem; margin-top: 0.75rem; margin-bottom: 1.25rem; background: rgba(255, 255, 255, 0.01); border: 1px solid rgba(255, 255, 255, 0.04); padding: 0.5rem 0.75rem; border-radius: 6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem;">
+                    <span style="color:var(--ghost); font-weight:600; display:flex; align-items:center; gap:5px;"><i class="fa-solid fa-cloud-arrow-up" style="color:var(--cyan); font-size: 0.75rem;"></i> Publishing...</span>
+                    <span id="active-upload-stats" style="color:var(--smoke); font-family:monospace; font-weight:500;">0% | Speed: Calculating... | ETA: Calculating...</span>
+                </div>
+                <div style="width:100%; height:3px; background:rgba(0,0,0,0.3); border-radius:1.5px; overflow:hidden;">
+                    <div id="active-upload-progress-bar" style="width:0%; height:100%; background: var(--cyan); transition: width 0.3s ease;"></div>
+                </div>
+            </div>
+            
+            <!-- VIEW: AUTOPILOT -->
+            <div id="view-autopilot" class="app-view active">
+                <div class="glass-panel">
+                    <h2 class="panel-title">Autopilot</h2>
+                    
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="auto-niche">Niche</label>
+                            <select id="auto-niche" onchange="toggleCustomNicheInput(this.value)">
+                                <option value="">Rotate Trending Pools</option>
+                                <option value="drama">Drama & Podcast Debates</option>
+                                <option value="motivation">Motivation & Sports Commentary</option>
+                                <option value="gaming">Gaming & Streamer Rage</option>
+                                <option value="twitch">Twitch VOD Highlights</option>
+                                <option value="tech">Tech news, Space & AI breakthroughs</option>
+                                <option value="finance">Crypto, Finance debates & Wealth hacks</option>
+                                <option value="comedy">Standup crowdwork & Funny failures</option>
+                                <option value="custom_option">Enter Custom Topic</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="custom-niche-container" style="display: none;">
+                            <label for="auto-niche-custom" style="color: var(--gold);"><i class="fa-solid fa-sparkles"></i> Custom Niche</label>
+                            <input type="text" id="auto-niche-custom" placeholder="e.g. quantum physics, space travel, street food">
+                        </div>
+                        <div class="form-group">
+                            <label for="auto-count">Clips per Video</label>
+                            <input type="number" id="auto-count" min="1" max="10" value="3">
+                        </div>
+                        <div class="form-group">
+                            <label for="auto-keyword">Keyword (Optional)</label>
+                            <input type="text" id="auto-keyword" placeholder="e.g. standing on business, crashout">
+                        </div>
+                        <div class="form-group">
+                            <label for="auto-channel">Channel (Optional)</label>
+                            <input type="text" id="auto-channel" placeholder="e.g. @joe_rogan, podcast_channel">
+                        </div>
+                        <div class="form-group">
+                            <label for="auto-duration">Time Window</label>
+                            <select id="auto-duration">
+                                <option value="all" selected>Any Time</option>
+                                <option value="today">Today (Last 24 hours)</option>
+                                <option value="week">This Week (Last 7 days)</option>
+                                <option value="month">This Month (Last 30 days)</option>
+                            </select>
+                        </div>
+                        <div class="form-group-full" style="flex-direction: row; align-items: center; gap: 1rem; margin-top: 0.5rem; background: var(--ink); padding: 1rem; border: 1px solid var(--wire); flex-wrap: wrap; display: flex;">
+                            <label style="display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--smoke); font-weight: 500; margin: 0; user-select: none;">
+                                <input type="checkbox" id="auto-upload" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Auto-publish to Configured Platforms</span>
+                            </label>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto;">
+                                <label style="font-size: 0.8rem; color: var(--ghost); font-weight: 600;">Privacy:</label>
+                                <select id="auto-privacy" style="padding: 0.35rem 0.5rem; font-size: 0.78rem; border-radius: 4px; border: 1px solid var(--wire); background: var(--ink); color: var(--smoke); cursor: pointer;">
+                                    <option value="private" selected>🔒 Private</option>
+                                    <option value="unlisted">🔗 Unlisted</option>
+                                    <option value="public">🌍 Public</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-cyan" onclick="launchAutopilot()">Launch Autopilot</button>
+                </div>
+            </div>
+            
+            <!-- VIEW: CLIPPER STUDIO -->
+            <div id="view-clipper" class="app-view">
+                <div class="glass-panel">
+                    <h2 class="panel-title">Clipper</h2>
+                    
+                    <div class="form-grid" style="margin-bottom: 2rem;">
+                        <div class="form-group-full">
+                            <label for="manual-url">YouTube Video URL</label>
+                            <div style="display:flex; gap:1rem;">
+                                <div style="position:relative; flex-grow:1; display:flex; align-items:center;">
+                                    <input type="text" id="manual-url" style="width:100%; padding-right: 70px;" placeholder="https://www.youtube.com/watch?v=...">
+                                    <div style="position:absolute; right:12px; display:flex; gap:0.4rem; align-items:center; z-index: 10;">
+                                        <!-- Paste Button -->
+                                        <button onclick="pasteClipboardUrl()" style="background:none; border:none; color:var(--ghost); cursor:pointer; font-size:0.9rem; padding: 4px; transition:color 0.2s;" title="Paste from clipboard" onmouseover="this.style.color='var(--cyan)'" onmouseout="this.style.color='var(--ghost)'">
+                                            <i class="fa-solid fa-paste"></i>
+                                        </button>
+                                        <!-- Clear/Cross Button -->
+                                        <button onclick="clearManualClipper()" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.9rem; padding: 4px; transition:color 0.2s;" title="Clear Link & Results" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#ef4444'">
+                                            <i class="fa-solid fa-circle-xmark"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <button class="btn btn-cyan" id="btn-manual-analyze" onclick="analyzeVideoInteractive()">Analyze</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Video Details Card -->
+                    <div id="interactive-video-card" class="glass-panel" style="display:none; gap: 1.5rem; padding: 1.25rem; margin-bottom: 2rem; border-color: rgba(0, 210, 255, 0.2); background: rgba(255, 255, 255, 0.01); align-items: center;">
+                        <img id="inter-video-thumb" src="" style="width: 140px; height: 90px; border-radius: 8px; object-fit: cover; border: 1px solid var(--wire);" alt="Video Thumbnail">
+                        <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; flex-grow:1;">
+                            <h3 id="inter-video-title" style="font-size: 1.1rem; color: var(--gold); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom: 0.25rem;">Video Title</h3>
+                            <div id="inter-video-url" style="font-size: 0.8rem; font-family: monospace; color: var(--ghost); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">URL</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Analysis Progress Status -->
+                    <div id="clipper-loading-panel" style="display:none; text-align:center; padding: 3rem; background: var(--ink); border: 1px solid var(--wire); border-radius: 12px; margin-bottom: 2rem;">
+                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2.5rem; color: var(--gold); margin-bottom: 1.5rem;"></i>
+                        <h3 id="clipper-loading-text" style="font-size: 1.15rem; color: var(--smoke);">Analyzing video...</h3>
+                    </div>
+
+                    <!-- Clipper Results Panel -->
+                    <div id="clipper-results-panel" style="display:none;">
+                        <h3 style="margin-bottom: 1.25rem; font-size:1.15rem; color: var(--smoke); display:flex; align-items:center; gap:8px;">
+                            <i class="fa-solid fa-sparkles" style="color:var(--gold);"></i> Recommended Highlights
+                        </h3>
+
+                        <!-- Highlights Recommendations Grid -->
+                        <div id="highlights-cards-grid" style="display:grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- VIEW: LIBRARY -->
+            <div id="view-library" class="app-view">
+                <div class="glass-panel">
+                    <h2 class="panel-title" style="justify-content: space-between;">
+                        <span>Library</span>
+                        <button class="btn btn-secondary btn-mini" onclick="refreshLibrary()">Refresh</button>
+                    </h2>
+                    
+                    <!-- Library Tabs -->
+                    <div style="display: flex; gap: 1rem; border-bottom: 1px solid var(--wire); margin-bottom: 1.5rem; padding-bottom: 0.5rem;">
+                        <button id="tab-library-local" class="btn btn-mini" style="background: transparent; border: none; color: var(--gold); border-bottom: 2px solid var(--gold); font-weight: bold; border-radius: 0; padding: 4px 12px; font-size: 0.85rem; cursor: pointer; transition: all 0.2s;" onclick="switchLibraryTab('local')">
+                            Ready to Publish
+                        </button>
+                        <button id="tab-library-published" class="btn btn-mini" style="background: transparent; border: none; color: var(--smoke); font-weight: 500; border-radius: 0; padding: 4px 12px; font-size: 0.85rem; cursor: pointer; transition: all 0.2s;" onclick="switchLibraryTab('published')">
+                            Published
+                        </button>
+                    </div>
+
+                    <!-- Active Uploading Status Widget -->
+                    <div id="active-uploading-container" style="display:none; margin-bottom: 1.5rem;"></div>
+
+                    <div class="clips-grid" id="library-clips-container">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="app-view">
+                <div class="glass-panel">
+                    <h2 class="panel-title">Settings</h2>
+                    
+                    <!-- Essentials Section -->
+                    <div class="settings-section">
+                        <h3 class="settings-section-title">Essentials</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="set-gemini-key">Gemini API Key</label>
+                                <input type="text" id="set-gemini-key" placeholder="AI-analysis authentication token">
+                            </div>
+                            <div class="form-group">
+                                <label for="set-age-days">Max Video Age (Days)</label>
+                                <input type="number" id="set-age-days" value="90">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Quality & Styling Section -->
+                    <div class="settings-section" style="margin-top: 1.5rem;">
+                        <h3 class="settings-section-title">Quality & Styling</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="set-whisper-model">Speech Recognition Model</label>
+                                <select id="set-whisper-model">
+                                    <option value="tiny.en">Tiny (Fastest)</option>
+                                    <option value="base.en">Base (Balanced)</option>
+                                    <option value="small.en">Small (Accurate)</option>
+                                    <option value="large-v3">Large-v3 (Precise)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="set-subtitle-style">Burnt-In Subtitles</label>
+                                <select id="set-subtitle-style" onchange="toggleCustomStylePanel(this.value)">
+                                    <option value="default">Default Cyberpunk</option>
+                                    <option value="mrbeast">MrBeast Pop</option>
+                                    <option value="hormozi">Hormozi Glow</option>
+                                    <option value="clean">Minimal Clean</option>
+                                    <option value="gold">Gold Premium</option>
+                                    <option value="minimal">Minimalist Capsule</option>
+                                    <option value="custom">Custom Typography Theme</option>
+                                </select>
+                            </div>
+                            
+                            <div id="custom-style-panel" class="glass-panel" style="display: none; grid-column: span 2; gap: 1.25rem; padding: 1.25rem; margin-top: 0.5rem; border-color: rgba(0, 210, 255, 0.2); background: rgba(255, 255, 255, 0.005); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+                                <h4 style="grid-column: span 100%; color: var(--gold); font-size: 0.95rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                                    <i class="fa-solid fa-palette"></i> Custom Subtitle Theme
+                                </h4>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-font-name" style="font-size: 0.78rem;">Font Family</label>
+                                    <input type="text" id="cust-font-name" value="Inter Bold" style="padding: 0.4rem 0.75rem; font-size: 0.82rem;">
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-font-size" style="font-size: 0.78rem;">Font Size</label>
+                                    <input type="number" id="cust-font-size" value="58" style="padding: 0.4rem 0.75rem; font-size: 0.82rem;">
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-pri-color" style="font-size: 0.78rem;">Primary Color</label>
+                                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                        <input type="color" id="cust-pri-color-picker" value="#F2F2F2" style="width: 32px; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 0; background: none;" oninput="document.getElementById('cust-pri-color').value = this.value">
+                                        <input type="text" id="cust-pri-color" value="#F2F2F2" style="flex: 1; padding: 0.4rem 0.75rem; font-size: 0.82rem;" oninput="document.getElementById('cust-pri-color-picker').value = this.value">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-out-color" style="font-size: 0.78rem;">Outline Color</label>
+                                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                        <input type="color" id="cust-out-color-picker" value="#000000" style="width: 32px; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 0; background: none;" oninput="document.getElementById('cust-out-color').value = this.value">
+                                        <input type="text" id="cust-out-color" value="#000000" style="flex: 1; padding: 0.4rem 0.75rem; font-size: 0.82rem;" oninput="document.getElementById('cust-out-color-picker').value = this.value">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-out-val" style="font-size: 0.78rem;">Outline Width</label>
+                                    <input type="number" id="cust-out-val" value="2.5" step="0.5" style="padding: 0.4rem 0.75rem; font-size: 0.82rem;">
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="cust-shd-val" style="font-size: 0.78rem;">Shadow Depth</label>
+                                    <input type="number" id="cust-shd-val" value="1.0" step="0.5" style="padding: 0.4rem 0.75rem; font-size: 0.82rem;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Advanced & Hardware Section (Collapsible) -->
+                    <div class="settings-section" style="margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 1.25rem;">
+                        <h3 class="settings-section-title" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;" onclick="toggleAdvancedSettings()">
+                            <span>Advanced & Hardware</span>
+                            <span id="adv-settings-toggle-btn" class="btn btn-secondary btn-mini" style="font-size: 0.7rem; padding: 2px 8px; margin: 0;">Show</span>
+                        </h3>
+                        <div id="advanced-settings-container" style="display: none; margin-top: 1.25rem;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="set-whisper-device">Whisper Compute Device</label>
+                                    <select id="set-whisper-device">
+                                        <option value="cpu">CPU (Standard)</option>
+                                        <option value="cuda">CUDA (NVIDIA GPU)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-whisper-compute">Whisper Quantization</label>
+                                    <select id="set-whisper-compute">
+                                        <option value="int8">int8 (Standard)</option>
+                                        <option value="float16">float16 (High Performance)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-video-codec">FFmpeg Video Codec</label>
+                                    <select id="set-video-codec">
+                                        <option value="libx264">libx264 (CPU)</option>
+                                        <option value="h264_nvenc">h264_nvenc (NVIDIA GPU)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-video-preset">FFmpeg Preset</label>
+                                    <select id="set-video-preset">
+                                        <option value="ultrafast">ultrafast</option>
+                                        <option value="veryfast">veryfast</option>
+                                        <option value="fast">fast</option>
+                                        <option value="medium">medium</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex-direction:row; align-items:center; gap:1rem; padding-top:1rem; grid-column: span 2;">
+                                    <input type="checkbox" id="set-enable-gpu" style="width:20px; height:20px;">
+                                    <label for="set-enable-gpu" style="margin: 0;">Enable GPU Acceleration</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Hardware Diagnostics Panel -->
+                            <div style="margin-top: 1.5rem; background: rgba(255, 255, 255, 0.01); border: 1px solid var(--wire); padding: 1rem; border-radius: 8px;">
+                                <h4 style="font-size: 0.8rem; font-family: var(--font-display); color: var(--ash); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">System Diagnostics</h4>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem;">
+                                    <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                                        <span style="font-size: 0.65rem; color: var(--ghost); font-weight: 700; text-transform: uppercase;">Whisper Device</span>
+                                        <span id="stat-whisper-device" style="font-size: 0.8rem; font-weight: 600; color: var(--smoke);">CPU</span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                                        <span style="font-size: 0.65rem; color: var(--ghost); font-weight: 700; text-transform: uppercase;">Whisper Configuration</span>
+                                        <span id="status-whisper" style="font-size: 0.8rem; font-weight: 600; color: var(--smoke);">CPU</span>
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                                        <span style="font-size: 0.65rem; color: var(--ghost); font-weight: 700; text-transform: uppercase;">GPU Encoding</span>
+                                        <span id="status-gpu" style="font-size: 0.8rem; font-weight: 600; color: var(--smoke);">Disabled</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-cyan" onclick="saveSettings()" style="margin-top: 1.5rem;">SAVE CONFIGURATION</button>
+                </div>
+            </div>
+
+            <!-- VIEW: WATCHDOG -->
+            <div id="view-watchdog" class="app-view" style="display: none;">
+                <div class="glass-panel" style="padding: 2rem;">
+                    <h2 class="panel-title" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span><i class="fa-solid fa-eye" style="color: var(--cyan);"></i> Watchdog</span>
+                        <label style="display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; color: var(--smoke);">
+                            <input type="checkbox" id="watchdog-toggle" onchange="toggleWatchdog(this.checked)" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>Active</span>
+                        </label>
+                    </h2>
+                    <p style="color: var(--ghost); font-size: 0.85rem; margin-top: -0.5rem; margin-bottom: 1.5rem;">
+                        Watchdog scans monitored channels for new long-form uploads and automatically drafts or publishes cropped, captioned short clips.
+                    </p>
+                    
+                    <!-- Add Channel Row -->
+                    <div style="display: flex; gap: 1rem; margin-bottom: 2rem; background: rgba(255,255,255,0.01); border: 1px solid var(--wire); padding: 1rem; border-radius: 8px;">
+                        <div style="flex: 1; display: flex; flex-direction: column; gap: 0.4rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--smoke);">Channel URL or Handle</label>
+                            <input type="text" id="watchdog-url-input" placeholder="e.g. https://www.youtube.com/@LexFridman or @joerogan" style="flex: 1; padding: 0.6rem 1rem; background: var(--ink); border: 1px solid var(--wire); border-radius: 6px; color: var(--smoke); font-size: 0.88rem;">
+                        </div>
+                        <div style="display: flex; align-items: flex-end;">
+                            <button class="btn btn-cyan" onclick="addWatchdogChannel()" style="padding: 0.6rem 1.5rem; font-weight: 600;">
+                                <i class="fa-solid fa-plus"></i> Add Channel
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Monitored Channels Table -->
+                    <h3 style="font-size: 1rem; color: var(--smoke); margin-bottom: 1rem; font-family: var(--font-display);">Monitored Channels</h3>
+                    <div style="overflow-x: auto;">
+                        <table class="highlights-table" style="width: 100%; text-align: left; border-collapse: collapse;">
+                            <thead>
+                                <tr>
+                                    <th>Channel Handle/Name</th>
+                                    <th>YouTube URL</th>
+                                    <th>Last Seen Video ID</th>
+                                    <th style="text-align: right;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="watchdog-channels-list">
+                                <!-- Dynamically populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Live scrolling console terminal -->
+            <div class="glass-panel" style="padding: 1.5rem;" id="terminal-panel">
+                <h3 style="font-size:1.05rem; margin-bottom:0px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleTerminalCollapsed()">
+                    <span style="display:flex; align-items:center; gap:0.5rem;"><i class="fa-solid fa-terminal" style="color:var(--accent-green)"></i> Console</span>
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <span style="font-size:0.75rem; background:rgba(16,185,129,0.15); padding:2px 8px; border-radius:4px;" id="term-status-badge">Stream Listening</span>
+                        <button class="btn btn-secondary btn-mini" style="font-size:0.7rem; padding: 2px 8px; margin: 0; display: inline-flex; align-items: center; gap: 4px;" id="terminal-toggle-btn">
+                            <i class="fa-solid fa-chevron-down" id="terminal-toggle-icon"></i>
+                            <span id="terminal-toggle-text">Show Details</span>
+                        </button>
+                    </div>
+                </h3>
+                <div class="terminal-container" id="terminal-container-wrapper" style="display: none; margin-top: 1rem; transition: all 0.3s ease;">
+                    <div class="terminal-header">
+                        <div class="terminal-controls">
+                            <span class="terminal-dot term-red"></span>
+                            <span class="terminal-dot term-yel"></span>
+                            <span class="terminal-dot term-grn"></span>
+                        </div>
+                        <span class="terminal-title">clipper@vanguard:~# log-stream --follow</span>
+                    </div>
+                    <div class="terminal-body" id="terminal-body-feed">
+[Vanguard Terminal Console Started] Listening for live process logging events...
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+    
+    <!-- Custom Style Injection for new features -->
+    
+
+    <!-- Vertical Video Preview Player Modal -->
+    <div class="modal" id="preview-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title" id="modal-video-title">Preview Vertical Short</span>
+                <button class="modal-close" onclick="closeVideoModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="position: relative; display: flex; justify-content: center; align-items: center; background: #030408; overflow: hidden; height: 450px;">
+                <div id="modal-player-wrapper" style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
+                    <video id="modal-video-player" controls style="max-height: 100%; max-width: 100%; z-index: 1;"></video>
+                    <iframe id="modal-youtube-player" style="display: none; width: 100%; height: 100%; border: none; z-index: 1;" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                    
+                    <!-- Crop Bounding Box Safe Zone Mask -->
+                    <div id="modal-crop-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; display: flex; justify-content: center; align-items: center;">
+                        <div id="crop-mask-left" style="flex: 1; height: 100%; background: rgba(0, 0, 0, 0.75); border-right: 1.5px dashed var(--wire); transition: all 0.2s ease;"></div>
+                        <div id="crop-safe-box" style="width: 253px; height: 100%; border: 2px dashed var(--cyan); box-shadow: 0 0 15px var(--cyan-glow); background: rgba(0, 210, 255, 0.04); position: relative; flex-shrink: 0; transition: all 0.2s ease;">
+                            <span style="position: absolute; top: 8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: var(--cyan); padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-family: monospace; font-weight: 700; border: 1px solid var(--cyan); white-space: nowrap;">9:16 SAFE ZONE</span>
+                        </div>
+                        <div id="crop-mask-right" style="flex: 1; height: 100%; background: rgba(0, 0, 0, 0.75); border-left: 1.5px dashed var(--wire); transition: all 0.2s ease;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-mini" onclick="closeVideoModal()">Close</button>
+                <a id="modal-video-download" href="#" download class="btn btn-cyan btn-mini">Download</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unified Toast Notification System -->
+    <div id="toast-container" class="toast-container"></div>
+    <div class="sidebar-overlay" onclick="toggleMobileSidebar(false)"></div>
+
+
+
+    <!-- Assistant Drawer -->
+    <div id="assistant-drawer" class="assistant-drawer">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--wire); background: rgba(0,0,0,0.15);">
+            <h3 style="font-size: 1rem; font-family: var(--font-display); color: var(--gold); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <i class="fa-solid fa-brain"></i> Gemini Co-Writer
+            </h3>
+            <button onclick="toggleAssistantDrawer(false)" style="background: none; border: none; color: var(--smoke); font-size: 1.5rem; cursor: pointer; line-height: 1;">&times;</button>
+        </div>
+        
+        <!-- Chat Messages Scroll Area -->
+        <div id="assistant-chat-log" style="flex: 1; overflow-y: auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+            <div class="assistant-msg ai">
+                👋 Hi! I'm your Gemini AI Metadata Co-Writer. Click a quick prompt below or type your instruction to generate titles, viral hooks, tags, or description copy!
+            </div>
+        </div>
+        
+        <!-- Presets and Prompts -->
+        <div style="padding: 0.75rem 1rem; background: rgba(0,0,0,0.15); border-top: 1px solid var(--wire); display: flex; gap: 0.5rem; overflow-x: auto; white-space: nowrap; scrollbar-width: none;">
+            <button class="btn btn-mini btn-secondary" onclick="sendQuickAssistantPrompt('Generate 3 catchy viral titles/hooks for this clip.')">📝 Titles & Hooks</button>
+            <button class="btn btn-mini btn-secondary" onclick="sendQuickAssistantPrompt('Write an engaging video description with SEO keywords and relevant tags.')">✍️ Description</button>
+            <button class="btn btn-mini btn-secondary" onclick="sendQuickAssistantPrompt('List the top 15 trending hashtags for this video clip niche.')">🏷️ Hashtags</button>
+        </div>
+        
+        <!-- Chat Input Area -->
+        <div style="padding: 1rem 1.5rem; border-top: 1px solid var(--wire); background: rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <select id="assistant-copy-target" style="flex: 1; padding: 0.35rem 0.6rem; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--wire); background: var(--ink); color: var(--smoke);">
+                    <option value="none">Choose field to paste results...</option>
+                    <option value="title">Paste to Title field</option>
+                    <option value="description">Paste to Description field</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="assistant-chat-input" placeholder="Ask Gemini..." onkeydown="if(event.key==='Enter') sendGeminiAssistantMsg()" style="flex: 1; padding: 0.5rem 0.75rem; background: var(--ink); border: 1px solid var(--wire); border-radius: 6px; color: var(--smoke); font-size: 0.85rem;">
+                <button class="btn btn-cyan btn-mini" onclick="sendGeminiAssistantMsg()" style="padding: 0 0.85rem;">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Logic -->
+    
+
+    <script src="/ui/js/app.js"></script>
+</body>
+</html>

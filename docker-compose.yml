@@ -1,0 +1,12 @@
+services:
+  shorts-clipper:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./outputs:/app/outputs
+      - ./models:/app/models
+      - ./.cache:/app/.cache
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "shorts_clipper.api.server:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,1 @@
+"""Highlight detection and scoring."""

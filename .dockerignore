@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+env
+.venv
+__pycache__
+*.pyc
+*.mp4
+*.mp3
+*.webm
+*.m4a
+models
+outputs
+.cache
+.pytest_cache
+.ruff_cache
