@@ -51,6 +51,11 @@ class Settings:
     models_dir: Path = Path("models")
     output_dir: Path = Path("outputs")
     cache_dir: Path = Path(".cache/shorts-clipper")
+    archive_dir: str = "outputs/archive"
+    clip_retention_days: int = 30
+    max_keep_clips: int = 200
+    publish_at: str | None = None
+    publish_interval_seconds: int = 30
     log_level: str = "INFO"
     enable_gpu: bool = False
     video_codec: str = "libx264"
@@ -107,6 +112,30 @@ class Settings:
             scout_max_age_days = int(_env("SHORTS_SCOUT_MAX_AGE_DAYS", file_values, "90") or "90")
         except ValueError:
             scout_max_age_days = 90
+        if scout_max_age_days < 0:
+            scout_max_age_days = 90
+        try:
+            clip_retention_days = int(
+                _env("SHORTS_CLIP_RETENTION_DAYS", file_values, "30") or "30"
+            )
+        except ValueError:
+            clip_retention_days = 30
+        if clip_retention_days < 0:
+            clip_retention_days = 30
+        try:
+            max_keep_clips = int(_env("SHORTS_MAX_KEEP_CLIPS", file_values, "200") or "200")
+        except ValueError:
+            max_keep_clips = 200
+        if max_keep_clips < 0:
+            max_keep_clips = 200
+        try:
+            publish_interval_seconds = int(
+                _env("SHORTS_PUBLISH_INTERVAL", file_values, "30") or "30"
+            )
+        except ValueError:
+            publish_interval_seconds = 30
+        if publish_interval_seconds < 0:
+            publish_interval_seconds = 30
         proxy = _env("SHORTS_PROXY", file_values)
 
         platforms_raw = (
@@ -186,6 +215,12 @@ class Settings:
                 _env("SHORTS_CACHE_DIR", file_values, ".cache/shorts-clipper")
                 or ".cache/shorts-clipper"
             ),
+            archive_dir=_env("SHORTS_PUBLISHED_ARCHIVE", file_values, "outputs/archive")
+            or "outputs/archive",
+            clip_retention_days=clip_retention_days,
+            max_keep_clips=max_keep_clips,
+            publish_at=_env("SHORTS_PUBLISH_AT", file_values),
+            publish_interval_seconds=publish_interval_seconds,
             log_level=(_env("SHORTS_LOG_LEVEL", file_values, "INFO") or "INFO").upper(),
             enable_gpu=enable_gpu,
             video_codec=video_codec,
