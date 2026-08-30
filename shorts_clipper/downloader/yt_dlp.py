@@ -71,6 +71,33 @@ def get_base_yt_dlp_cmd() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _subtitle_langs() -> list[str]:
+    """Configured subtitle languages (default: ru,en) from Settings/env."""
+    from shorts_clipper.core.settings import Settings
+
+    langs = Settings.from_env().subtitle_langs
+    return langs or ["ru", "en"]
+
+
+def _sub_lang_arg(langs: list[str]) -> str:
+    """Build the --sub-lang value, expanding each lang with common variants."""
+    variants: list[str] = []
+    for lang in langs:
+        variants.append(lang)
+        variants.append(f"{lang}-orig")
+        variants.append(f"{lang}-US")
+        variants.append(f"{lang}-GB")
+    return ",".join(dict.fromkeys(variants))
+
+
+def _srt_masks(langs: list[str]) -> list[str]:
+    """SRT glob masks for the configured languages and their variants."""
+    masks: list[str] = []
+    for lang in langs:
+        masks.append(f"subs.{lang}*.srt")
+    return masks
+
+
 def _srt_time_to_seconds(t: str) -> float:
     h, m, s_ms = t.split(":")
     s, ms = s_ms.split(",")
@@ -79,19 +106,21 @@ def _srt_time_to_seconds(t: str) -> float:
 
 def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[TranscriptSegment]:
     """
-    Download English subtitles (auto or manual) from YouTube.
+    Download subtitles (auto or manual) from YouTube for the configured languages.
 
     Retries with exponential backoff on rate-limit (429) errors.
     Returns parsed TranscriptSegment list, or empty list if unavailable.
     """
-    log.info("\n--- FETCHING NATIVE ENGLISH SUBTITLES ---")
+    log.info("\n--- FETCHING NATIVE SUBTITLES ---")
     output_base = work_dir / "subs"
+    langs = _subtitle_langs()
 
     last_err_str = ""
     for attempt in range(1, max_retries + 1):
         # Clean previous subtitle files for retry
-        for old_srt in work_dir.glob("subs.en*.srt"):
-            old_srt.unlink(missing_ok=True)
+        for mask in _srt_masks(langs):
+            for old_srt in work_dir.glob(mask):
+                old_srt.unlink(missing_ok=True)
 
         cmd = get_base_yt_dlp_cmd()
         cmd.extend(
@@ -99,7 +128,7 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
                 "--write-auto-subs",
                 "--write-subs",
                 "--sub-lang",
-                "en,en-orig,en-US,en-GB,en-CA,en-AU,en-NZ,en-IE,en-ZA",
+                _sub_lang_arg(langs),
                 "--sub-format",
                 "srt/best",
                 "--convert-subs",
@@ -155,7 +184,9 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
             raise SUBTITLE_NOT_AVAILABLE(f"Fetch failed: {last_err_str[:100]}") from None
 
         # Success — parse the SRT
-        srt_files = list(work_dir.glob("subs.en*.srt"))
+        srt_files = []
+        for mask in _srt_masks(langs):
+            srt_files.extend(work_dir.glob(mask))
         if not srt_files:
             _subtitle_metrics["fetch_failure"] += 1
             raise SUBTITLE_NOT_AVAILABLE("No SRT files found after successful download")
@@ -175,7 +206,7 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
                     text = " ".join(lines[2:]).strip()
                     segments.append(TranscriptSegment(start=start, end=end, text=text))
 
-        log.info("✅ Loaded %d English subtitle segments.", len(segments))
+        log.info("✅ Loaded %d subtitle segments.", len(segments))
         _subtitle_metrics["fetch_success"] += 1
         return segments
 

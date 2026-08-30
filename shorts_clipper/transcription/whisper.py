@@ -157,13 +157,13 @@ def get_whisper_model():
             "Loading Whisper model '%s' on %s...", settings.whisper_model, settings.whisper_device
         )
 
-        # Explicitly configure cpu_threads=2 to match our 2-core machine size.
+        # Explicitly configure cpu_threads=4 to match typical VPS sizing.
         # This prevents runaway CPU oversubscription and OpenMP thread contention.
         _global_model = WhisperModel(
             settings.whisper_model,
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
-            cpu_threads=2,
+            cpu_threads=4,
         )
         t_end = time.time()
         log.info(f"[WHISPER] model_load_time: {t_end - t_start:.1f}s")
@@ -195,6 +195,10 @@ def transcribe_clip(
 
     log.info("🎙 Transcribing %s with Whisper...", video_path.name)
 
+    from shorts_clipper.core.settings import Settings
+
+    settings = Settings.from_env()
+
     log.info("[WHISPER] waiting for transcription slot")
     with _transcription_semaphore:
         log.info("[WHISPER] transcription slot acquired")
@@ -204,6 +208,7 @@ def transcribe_clip(
             str(video_path),
             beam_size=beam_size,
             word_timestamps=True,
+            language=settings.whisper_language or None,
         )
         # Convert generator to list to force execution
         raw_segments = list(raw_segments)
@@ -212,11 +217,19 @@ def transcribe_clip(
     log.info("[WHISPER] transcription complete")
     log.info(f"[WHISPER] inference_time: {t_inference_end - t_inference_start:.1f}s")
 
-    if info.language != "en":
-        log.warning(
-            "⚠️  Whisper detected language '%s' (expected 'en'). "
-            "Transcript may be inaccurate — continuing anyway.",
+    if settings.whisper_language:
+        if info.language != settings.whisper_language:
+            log.warning(
+                "⚠️  Whisper detected language '%s' (requested '%s'). "
+                "Transcript may be inaccurate — continuing anyway.",
+                info.language,
+                settings.whisper_language,
+            )
+    else:
+        log.info(
+            "[WHISPER] auto-detected language: '%s' (confidence %.2f)",
             info.language,
+            info.language_probability,
         )
 
     segments: list[TranscriptSegment] = []

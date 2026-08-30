@@ -16,6 +16,9 @@ HOOK_PATTERNS = (
     "this is why",
     "changed everything",
     "the truth",
+    "смотри",
+    "внимание",
+    "стоп",
 )
 EMOTION_WORDS = {
     "amazing",
@@ -32,6 +35,13 @@ EMOTION_WORDS = {
     "worst",
     "changed",
     "everything",
+    "офигеть",
+    "невероятно",
+    "вау",
+    "блин",
+    "о нет",
+    "супер",
+    "ужасно",
 }
 VIRAL_WORDS = {
     "secret",
@@ -42,6 +52,13 @@ VIRAL_WORDS = {
     "viral",
     "million",
     "money",
+    "забей",
+    "повтори",
+    "подпишись",
+    "лайк",
+    "секрет",
+    "деньги",
+    "миллион",
 }
 
 
@@ -49,7 +66,7 @@ class RuleBasedHighlightScorer:
     def score_segment(self, segment: TranscriptSegment) -> HighlightScore:
         text = segment.text.strip()
         lower = text.lower()
-        words = re.findall(r"[a-zA-Z']+", lower)
+        words = re.findall(r"[\w']+", lower)
         word_count = len(words)
         duration = max(segment.duration, 0.001)
         words_per_second = word_count / duration
