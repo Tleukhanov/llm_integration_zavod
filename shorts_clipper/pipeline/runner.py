@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import tempfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -310,6 +311,44 @@ def run(
                 # Shift timestamps in precision_segments to account for trimming
                 trim_start = final_window.start
                 duration = final_window.end - final_window.start
+
+                # ── Step 2.6: Audio-energy bias for stream VODs ──────────────
+                if settings.stream_audio_energy_enabled:
+                    from shorts_clipper.attention.audio_energy import (
+                        bias_toward_energetic,
+                        extract_audio_energy,
+                    )
+                    from shorts_clipper.core.models import ClipWindow
+
+                    micro_duration = (window.end + BUFFER) - buffered_start
+                    energy = extract_audio_energy(
+                        micro_path,
+                        window_seconds=settings.stream_energy_window_seconds,
+                        max_seconds=int(math.ceil(micro_duration)),
+                    )
+                    if energy:
+                        biased = bias_toward_energetic(
+                            precision_segments,
+                            energy,
+                            fallback=None,
+                            threshold=settings.stream_energy_threshold,
+                            window_seconds=settings.stream_energy_window_seconds,
+                        )
+                        if biased is not None and biased is not precision_segments:
+                            new_start = min(biased[0].start, biased[-1].start)
+                            new_end = max(biased[0].end, biased[-1].end)
+                            if new_end > new_start:
+                                log.info(
+                                    "Audio-energy bias: narrowed window %.2f-%.2f -> %.2f-%.2f",
+                                    trim_start,
+                                    final_window.end,
+                                    new_start,
+                                    new_end,
+                                )
+                                final_window = ClipWindow(start=new_start, end=new_end)
+                                trim_start = final_window.start
+                                duration = final_window.end - final_window.start
+
                 shifted_segments = []
                 for s in precision_segments:
                     shifted_words = []

@@ -65,6 +65,7 @@ class FeatureSet:
     start_time: float
     end_time: float
     semantic_segments: list[SemanticSegment]
+    audio_energy: list[float] = field(default_factory=list)
 
 
 @dataclass

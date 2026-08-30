@@ -58,6 +58,9 @@ class Settings:
     r2_secret_access_key: str | None = None
     r2_bucket_name: str | None = None
     publish_platforms: list[str] = field(default_factory=lambda: ["youtube", "instagram"])
+    stream_audio_energy_enabled: bool = True
+    stream_energy_window_seconds: float = 1.0
+    stream_energy_threshold: float = 0.15
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -103,6 +106,24 @@ class Settings:
         )
         publish_platforms = [p.strip() for p in platforms_raw.split(",") if p.strip()]
 
+        stream_audio_energy_enabled = (
+            _env("SHORTS_STREAM_AUDIO_ENERGY", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            stream_energy_window_seconds = float(
+                _env("SHORTS_STREAM_ENERGY_WINDOW", file_values, "1.0") or "1.0"
+            )
+        except ValueError:
+            stream_energy_window_seconds = 1.0
+
+        try:
+            stream_energy_threshold = float(
+                _env("SHORTS_STREAM_ENERGY_THRESHOLD", file_values, "0.15") or "0.15"
+            )
+        except ValueError:
+            stream_energy_threshold = 0.15
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -142,4 +163,7 @@ class Settings:
             r2_secret_access_key=_env("R2_SECRET_ACCESS_KEY", file_values),
             r2_bucket_name=_env("R2_BUCKET_NAME", file_values),
             publish_platforms=publish_platforms,
+            stream_audio_energy_enabled=stream_audio_energy_enabled,
+            stream_energy_window_seconds=stream_energy_window_seconds,
+            stream_energy_threshold=stream_energy_threshold,
         )
