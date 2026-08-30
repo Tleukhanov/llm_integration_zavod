@@ -7,6 +7,7 @@ from shorts_clipper.attention.judges.cognitive import (
     PredictionErrorJudge,
 )
 from shorts_clipper.attention.judges.editorial import PayoffJudge, ScrollStopJudge
+from shorts_clipper.attention.judges.stream import StreamAudioEnergyJudge
 
 __all__ = [
     "JudgeRegistry",
@@ -16,4 +17,5 @@ __all__ = [
     "PredictionErrorJudge",
     "ScrollStopJudge",
     "PayoffJudge",
+    "StreamAudioEnergyJudge",
 ]

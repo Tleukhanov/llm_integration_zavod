@@ -135,6 +135,7 @@ class FeatureExtractor:
             start_time=start_time,
             end_time=end_time,
             semantic_segments=semantic_segments,
+            audio_energy=[],
         )
 
     @classmethod
@@ -163,4 +164,5 @@ class FeatureExtractor:
             start_time=0.0,
             end_time=0.0,
             semantic_segments=[],
+            audio_energy=[],
         )

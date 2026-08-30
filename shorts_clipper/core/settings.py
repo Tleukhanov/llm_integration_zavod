@@ -67,6 +67,9 @@ class Settings:
     affiliate_enabled: bool = False
     affiliate_banner_position: str = "bottom_left"
     subtitle_langs: list[str] = field(default_factory=lambda: ["ru", "en"])
+    stream_audio_energy_enabled: bool = True
+    stream_energy_window_seconds: float = 1.0
+    stream_energy_threshold: float = 0.15
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -132,6 +135,24 @@ class Settings:
         subtitle_langs_raw = _env("SHORTS_SUBTITLE_LANGS", file_values, "ru,en") or "ru,en"
         subtitle_langs = [p.strip() for p in subtitle_langs_raw.split(",") if p.strip()]
 
+        stream_audio_energy_enabled = (
+            _env("SHORTS_STREAM_AUDIO_ENERGY", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            stream_energy_window_seconds = float(
+                _env("SHORTS_STREAM_ENERGY_WINDOW", file_values, "1.0") or "1.0"
+            )
+        except ValueError:
+            stream_energy_window_seconds = 1.0
+
+        try:
+            stream_energy_threshold = float(
+                _env("SHORTS_STREAM_ENERGY_THRESHOLD", file_values, "0.15") or "0.15"
+            )
+        except ValueError:
+            stream_energy_threshold = 0.15
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -183,4 +204,7 @@ class Settings:
             affiliate_enabled=affiliate_enabled,
             affiliate_banner_position=affiliate_banner_position,
             subtitle_langs=subtitle_langs,
+            stream_audio_energy_enabled=stream_audio_energy_enabled,
+            stream_energy_window_seconds=stream_energy_window_seconds,
+            stream_energy_threshold=stream_energy_threshold,
         )
