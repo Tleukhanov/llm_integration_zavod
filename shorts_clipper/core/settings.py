@@ -58,6 +58,9 @@ class Settings:
     r2_secret_access_key: str | None = None
     r2_bucket_name: str | None = None
     publish_platforms: list[str] = field(default_factory=lambda: ["youtube", "instagram"])
+    affiliate_partners_path: str = "affiliate_partners.json"
+    affiliate_enabled: bool = False
+    affiliate_banner_position: str = "bottom_left"
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -103,6 +106,23 @@ class Settings:
         )
         publish_platforms = [p.strip() for p in platforms_raw.split(",") if p.strip()]
 
+        affiliate_enabled = (_env("AFFILIATE_ENABLED", file_values, "false") or "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        affiliate_banner_position = (
+            _env("AFFILIATE_BANNER_POSITION", file_values, "bottom_left") or "bottom_left"
+        ).strip().lower()
+        if affiliate_banner_position not in {
+            "bottom_left",
+            "bottom_right",
+            "top_left",
+            "top_right",
+        }:
+            affiliate_banner_position = "bottom_left"
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -142,4 +162,10 @@ class Settings:
             r2_secret_access_key=_env("R2_SECRET_ACCESS_KEY", file_values),
             r2_bucket_name=_env("R2_BUCKET_NAME", file_values),
             publish_platforms=publish_platforms,
+            affiliate_partners_path=_env(
+                "AFFILIATE_PARTNERS_PATH", file_values, "affiliate_partners.json"
+            )
+            or "affiliate_partners.json",
+            affiliate_enabled=affiliate_enabled,
+            affiliate_banner_position=affiliate_banner_position,
         )

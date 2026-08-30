@@ -20,6 +20,12 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from shorts_clipper.affiliate import (
+    build_affiliate_description,
+    load_affiliate_partners,
+    select_affiliate_partner,
+    select_affiliate_transcript_text,
+)
 from shorts_clipper.captions.generator import burn_subtitles
 from shorts_clipper.core.exceptions import MediaProcessingError
 from shorts_clipper.core.logging import configure_logging
@@ -369,6 +375,30 @@ def run(
                     style_name=settings.subtitle_style,
                 )
 
+                affiliate_partner = None
+                if settings.affiliate_enabled:
+                    try:
+                        affiliate_partner = select_affiliate_partner(
+                            load_affiliate_partners(settings),
+                            transcript_text=select_affiliate_transcript_text(precision_segments),
+                            round_robin_index=idx - 1,
+                        )
+                    except Exception as aff_err:
+                        log.warning(
+                            "Affiliate partner selection failed for clip %d: %s", idx, aff_err
+                        )
+
+                banner_kwargs = {}
+                if (
+                    affiliate_partner is not None
+                    and affiliate_partner.banner_path
+                    and Path(affiliate_partner.banner_path).exists()
+                ):
+                    banner_kwargs = {
+                        "banner_image": affiliate_partner.banner_path,
+                        "banner_position": settings.affiliate_banner_position,
+                    }
+
                 burn_subtitles(
                     cropped_path,
                     precision_segments,
@@ -378,6 +408,7 @@ def run(
                     video_codec=settings.video_codec,
                     preset=settings.video_preset,
                     style_name=settings.subtitle_style,
+                    **banner_kwargs,
                 )
 
                 try:
@@ -433,6 +464,21 @@ def run(
                 meta["segments"] = [
                     {"start": s.start, "end": s.end, "text": s.text} for s in precision_segments
                 ]
+
+                # Append the affiliate offer before the sidecar write
+                if affiliate_partner is not None:
+                    try:
+                        partner_language = str((meta.get("language") or "en"))
+                        meta["description"] = build_affiliate_description(
+                            meta, affiliate_partner, partner_language
+                        )
+                        if affiliate_partner.tag and affiliate_partner.tag not in meta["tags"]:
+                            meta["tags"].append(affiliate_partner.tag)
+                        meta["affiliate_partner"] = affiliate_partner.id
+                    except Exception as aff_err:
+                        log.warning(
+                            "Affiliate metadata enrichment failed for clip %d: %s", idx, aff_err
+                        )
 
                 json_path = current_output_path.with_suffix(".json")
                 try:
