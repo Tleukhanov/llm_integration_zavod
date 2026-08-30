@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 import av
 
-DEFAULT_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+DEFAULT_URL = "https://www.youtube.com/watch?v=arj7oStGLkU"
 DEFAULT_WORK_DIR = r"D:\shorts_smoke"
 
 ENV_VARS: dict[str, str] = {
@@ -180,7 +180,8 @@ def main(argv: list[str] | None = None) -> int:
             completed = subprocess.run(
                 cmd,
                 timeout=args.timeout_secs,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
         except subprocess.TimeoutExpired as exc:
             for stream in (exc.stdout, exc.stderr):
@@ -226,9 +227,11 @@ def main(argv: list[str] | None = None) -> int:
             aprint("----- PASS/FAIL SUMMARY -----")
             aprint(f"{'Artifact':<22} {'Status':<8} Detail")
             aprint("-" * 60)
-            mp4s = sorted(out_dir.rglob("rendered_clip_*.mp4"))
-            jpgs = sorted(out_dir.rglob("thumbnail_*.jpg"))
-            metas = sorted(out_dir.rglob("final_metadata_*.json"))
+            _runs = sorted({p.parent for p in out_dir.rglob("rendered_clip_*.mp4")})
+            latest_run = _runs[-1] if _runs else None
+            mp4s = sorted(latest_run.glob("rendered_clip_*.mp4")) if latest_run else sorted(out_dir.rglob("rendered_clip_*.mp4"))
+            jpgs = sorted(latest_run.glob("thumbnail_*.jpg")) if latest_run else sorted(out_dir.rglob("thumbnail_*.jpg"))
+            metas = sorted(latest_run.glob("final_metadata_*.json")) if latest_run else sorted(out_dir.rglob("final_metadata_*.json"))
             rows = [
                 ("rendered_clip_*.mp4", res["found_mp4"], "found" if res["found_mp4"] else "missing"),
                 ("thumbnail_*.jpg", res["found_jpg"], "found" if res["found_jpg"] else "missing"),
@@ -248,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
                 status = "PASS" if ok else "FAIL"
                 aprint(f"{name:<22} {status:<8} {detail}")
 
-            all_ok = all(
+            all_ok = (
                 res["found_mp4"]
                 and res["found_jpg"]
                 and res["found_metadata"]
