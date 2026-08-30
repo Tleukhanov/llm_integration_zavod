@@ -11,6 +11,7 @@ from pathlib import Path
 
 from shorts_clipper.core.exceptions import SUBTITLE_NOT_AVAILABLE, YOUTUBE_RATE_LIMIT_429
 from shorts_clipper.core.models import TranscriptSegment
+from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +65,29 @@ def get_base_yt_dlp_cmd() -> list[str]:
         if proxies:
             cmd.extend(["--proxy", random.choice(proxies)])
     return cmd
+
+
+def _ffmpegwrapper_dir(src_ffmpeg: Path) -> Path:
+    """Stage the bundled ffmpeg under a generic ``ffmpeg.exe`` name.
+
+    yt-dlp's partial-download support looks for a binary literally named
+    ``ffmpeg``/``ffmpeg.exe`` in the ``--ffmpeg-location`` directory. The
+    imageio-ffmpeg binary has a versioned filename, so we expose it under the
+    expected name via a hardlink (same volume) or a copy.
+    """
+    import tempfile
+
+    wrapper_dir = Path(tempfile.gettempdir()) / "shorts_clipper_ffmpeg"
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    target = wrapper_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if not target.exists():
+        try:
+            os.link(src_ffmpeg, target)
+        except OSError:
+            import shutil
+
+            shutil.copy2(src_ffmpeg, target)
+    return wrapper_dir
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +358,17 @@ def download_clip(
 
     if start_time is not None and end_time is not None:
         cmd.extend(["--download-sections", f"*{start_time}-{end_time}"])
+        # Partial downloads require ffmpeg to cut and merge segments. Point
+        # yt-dlp at the bundled imageio-ffmpeg binary so it does not fail with
+        # "ffmpeg is not installed" in environments without a system ffmpeg.
+        # The bundled binary has a versioned name, so stage it under the
+        # generic `ffmpeg.exe` name that yt-dlp looks for.
+        try:
+            src_ffmpeg = Path(ffmpeg_path()).resolve()
+            ffmpeg_dir = _ffmpegwrapper_dir(src_ffmpeg)
+            cmd.extend(["--ffmpeg-location", str(ffmpeg_dir)])
+        except RuntimeError as exc:
+            log.warning("ffmpeg not available for partial download: %s", exc)
         # ffmpeg doesn't support curl_cffi impersonation, which causes 403s
         if "--impersonate" in cmd:
             idx = cmd.index("--impersonate")
