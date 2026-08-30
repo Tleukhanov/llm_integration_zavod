@@ -1,0 +1,28 @@
+[
+  {
+    "id": "skin_case_example",
+    "name": "SkinCase (example)",
+    "link_en": "https://example.com/skincase/STREAMER_ID_EN",
+    "link_ru": "https://example.com/skincase/STREAMER_ID_RU",
+    "banner_path": "assets/banners/skin_case.png",
+    "tag": "#ad",
+    "match_keywords": ["кейс", "skin", "csgo", "cs2", "case", "inventory"],
+    "enabled": true
+  },
+  {
+    "id": "knife_gallery_example",
+    "name": "KnifeGallery (example)",
+    "link_en": "https://example.com/knifegallery/STREAMER",
+    "link_ru": null,
+    "banner_path": null,
+    "tag": "#ad",
+    "match_keywords": ["knife", "нож"],
+    "enabled": true
+  },
+  {
+    "id": "cool_shop_example",
+    "name": "CoolShop (disabled example)",
+    "link_en": "https://example.com/coolshop/STREAMER",
+    "enabled": false
+  }
+]
