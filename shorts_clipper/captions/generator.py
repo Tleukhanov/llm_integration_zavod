@@ -310,6 +310,8 @@ def burn_subtitles(
     pacing: float = 1.0,
     video_codec: str = "libx264",
     style_name: str = "default",
+    banner_image: str | Path | None = None,
+    banner_position: str = "bottom_left",
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -318,15 +320,18 @@ def burn_subtitles(
     pass — no extra re-encode step needed.
 
     Args:
-        video_path:   Input video file.
-        segments:     Transcript segments with timing information.
-        start_offset: Start time offset for computing relative timestamps.
-        output_path:  Where to write the final video.
-        crf:          FFmpeg CRF quality (18 = near-lossless, 23 = default).
-        preset:       FFmpeg encode preset (fast, medium, slow).
-        pacing:       Speed multiplier (1.0 = no change, 1.15 = 15% faster).
-        video_codec:  FFmpeg video encoder codec to use.
-        style_name:   Subtitles style preset to burn in (default, mrbeast, minimal).
+        video_path:     Input video file.
+        segments:       Transcript segments with timing information.
+        start_offset:   Start time offset for computing relative timestamps.
+        output_path:    Where to write the final video.
+        crf:            FFmpeg CRF quality (18 = near-lossless, 23 = default).
+        preset:         FFmpeg encode preset (fast, medium, slow).
+        pacing:         Speed multiplier (1.0 = no change, 1.15 = 15% faster).
+        video_codec:    FFmpeg video encoder codec to use.
+        style_name:     Subtitles style preset to burn in (default, mrbeast, minimal).
+        banner_image:   Optional partner banner image overlaid on the video.
+        banner_position: Corner for the banner overlay
+                        (bottom_left, bottom_right, top_left, top_right).
 
     Returns:
         Path to the output video.
@@ -362,11 +367,27 @@ def burn_subtitles(
             "-y",
             "-i",
             str(video_path),
-            "-vf",
-            vf,
-            "-c:v",
-            video_codec,
         ]
+
+        banner = Path(banner_image) if banner_image else None
+        use_banner = banner is not None and banner.is_file()
+        if banner and not use_banner:
+            log.warning("Affiliate banner image not found, skipping overlay: %s", banner)
+
+        if use_banner:
+            cmd.extend(["-i", str(banner)])
+            overlay_x = "W-w-40" if "right" in banner_position else "40"
+            overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
+            filter_complex = (
+                f"[0:v]{vf}[v0];"
+                f"[1:v]scale=200:-1[logo];"
+                f"[v0][logo]overlay={overlay_x}:{overlay_y}[vout]"
+            )
+            cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
+        else:
+            cmd.extend(["-vf", vf])
+
+        cmd.extend(["-c:v", video_codec])
 
         if video_codec == "libx264":
             cmd.extend(["-crf", str(crf), "-preset", preset])
