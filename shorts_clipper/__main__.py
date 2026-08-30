@@ -151,6 +151,12 @@ def _cmd_cleanup(args: argparse.Namespace, settings: Settings) -> int:  # noqa: 
     return 0
 
 
+def _cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:  # noqa: ARG001
+    from shorts_clipper.cli.doctor import run_doctor
+
+    return run_doctor(settings)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m shorts_clipper",
@@ -266,6 +272,9 @@ def build_parser() -> argparse.ArgumentParser:
     # ── cleanup ────────────────────────────────────────────────────────────────────────
     sub.add_parser("cleanup", help="Archive published clips and prune old output files.")
 
+    # ── doctor ─────────────────────────────────────────────────────────────────────────
+    sub.add_parser("doctor", help="Check local environment and setup readiness.")
+
     return parser
 
 
@@ -283,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         "web": _cmd_web,
         "repair-metadata": _cmd_repair_metadata,
         "cleanup": _cmd_cleanup,
+        "doctor": _cmd_doctor,
     }
     return dispatch[args.command](args, settings)
 
