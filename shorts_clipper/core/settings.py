@@ -38,6 +38,10 @@ class Settings:
     instagram_password: str | None = None
     ig_access_token: str | None = None
     ig_account_id: str | None = None
+    tiktok_client_key: str | None = None
+    tiktok_client_secret: str | None = None
+    tiktok_access_token: str | None = None
+    tiktok_open_id: str | None = None
     ollama_base_url: str = "http://localhost:11434"
     default_provider: str = "gemini"
     whisper_model: str = "tiny.en"
@@ -119,6 +123,10 @@ class Settings:
             instagram_password=_env("INSTAGRAM_PASSWORD", file_values),
             ig_access_token=_env("IG_ACCESS_TOKEN", file_values),
             ig_account_id=_env("IG_ACCOUNT_ID", file_values),
+            tiktok_client_key=_env("TT_CLIENT_KEY", file_values),
+            tiktok_client_secret=_env("TT_CLIENT_SECRET", file_values),
+            tiktok_access_token=_env("TT_ACCESS_TOKEN", file_values),
+            tiktok_open_id=_env("TT_OPEN_ID", file_values),
             ollama_base_url=_env("OLLAMA_BASE_URL", file_values, "http://localhost:11434")
             or "http://localhost:11434",
             default_provider=_env("SHORTS_PROVIDER", file_values, "gemini") or "gemini",
