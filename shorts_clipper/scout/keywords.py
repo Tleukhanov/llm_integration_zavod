@@ -37,6 +37,15 @@ NICHE_KEYWORDS: dict[str, list[str]] = {
         "new release",
         "indie game",
     ],
+    "cs2": [
+        "cs2 clutch",
+        "cs2 1v5",
+        "cs2 awp ace",
+        "cs2 best moments",
+        "cs2 highlight",
+        "клатч кс",
+        "кс2 клатч",
+    ],
     "finance": [
         "stock market",
         "investing",
