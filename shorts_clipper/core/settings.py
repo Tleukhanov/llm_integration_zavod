@@ -80,6 +80,9 @@ class Settings:
     gameplay_top_windows: int = 5
     gameplay_min_length: float = 12.0
     gameplay_max_length: float = 60.0
+    bgm_mode: str = "off"
+    music_dir: Path = Path("D:/shorts_music")
+    bgm_volume: float = 0.30
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -288,4 +291,11 @@ class Settings:
             gameplay_top_windows=gameplay_top_windows,
             gameplay_min_length=gameplay_min_length,
             gameplay_max_length=gameplay_max_length,
+            bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
+            music_dir=Path(
+                _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"
+            ),
+            bgm_volume=float(
+                _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"
+            ),
         )

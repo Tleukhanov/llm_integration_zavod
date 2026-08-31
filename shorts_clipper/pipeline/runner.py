@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import random
 import tempfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -28,6 +29,7 @@ from shorts_clipper.affiliate import (
     select_affiliate_transcript_text,
 )
 from shorts_clipper.captions.generator import burn_subtitles
+from shorts_clipper.captions.music import pick_track, should_use_bgm
 from shorts_clipper.core.exceptions import MediaProcessingError, SUBTITLE_NOT_AVAILABLE
 from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.settings import Settings
@@ -309,6 +311,7 @@ def run(
                         raise MediaProcessingError("No high-quality highlights found.") from exc
 
             output_paths: list[Path] = []
+            last_track: Path | None = None
 
             for idx, (window, layout) in enumerate(clips, 1):
                 log.info(
@@ -494,6 +497,20 @@ def run(
                         "banner_position": settings.affiliate_banner_position,
                     }
 
+                bgm_kwargs = {}
+                if settings.bgm_mode != "off":
+                    bgm_seed = hash(str(current_output_path))
+                    run_seed = random.Random(bgm_seed)
+                    if should_use_bgm(settings.bgm_mode, run_seed):
+                        track = pick_track(settings.music_dir, run_seed, last_track)
+                        if track is not None:
+                            last_track = track
+                            log.info("🎵 BGM for clip %d: %s (mode=%s)", idx, track, settings.bgm_mode)
+                            bgm_kwargs = {
+                                "bgm_audio": track,
+                                "bgm_volume": settings.bgm_volume,
+                            }
+
                 burn_subtitles(
                     cropped_path,
                     precision_segments,
@@ -504,6 +521,7 @@ def run(
                     preset=settings.video_preset,
                     style_name=settings.subtitle_style,
                     **banner_kwargs,
+                    **bgm_kwargs,
                 )
 
                 try:
