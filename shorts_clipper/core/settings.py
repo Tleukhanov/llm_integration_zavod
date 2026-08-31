@@ -87,6 +87,8 @@ class Settings:
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
     bgm_volume: float = 0.30
+    hook_judge_enabled: bool = False
+    hook_min_score: float = 0.5
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -203,6 +205,17 @@ class Settings:
         stream_audio_energy_enabled = (
             _env("SHORTS_STREAM_AUDIO_ENERGY", file_values, "true") or "true"
         ).lower() in {"1", "true", "yes", "on"}
+
+        hook_judge_enabled = (
+            _env("SHORTS_HOOK_JUDGE_ENABLED", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            hook_min_score = float(
+                _env("SHORTS_HOOK_MIN_SCORE", file_values, "0.5") or "0.5"
+            )
+        except ValueError:
+            hook_min_score = 0.5
 
         try:
             stream_energy_window_seconds = float(
@@ -330,4 +343,6 @@ class Settings:
             bgm_volume=float(
                 _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"
             ),
+            hook_judge_enabled=hook_judge_enabled,
+            hook_min_score=hook_min_score,
         )

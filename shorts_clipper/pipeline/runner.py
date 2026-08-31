@@ -159,7 +159,7 @@ def run(
                             "The audio may be silent or below the energy threshold."
                         )
 
-                    # windows_from_audio returns best-energy-first; reorder by start for
+# windows_from_audio returns best-energy-first; reorder by start for
                     # deterministic downstream processing and preselect by count.
                     energy_windows.sort(key=lambda w: w.start)
                     gameplay_clips = [
@@ -200,6 +200,30 @@ def run(
                             raise MediaProcessingError(
                                 "Semantic Candidate Generator failed to find a valid window."
                             )
+
+                        # ── HOOK JUDGE (optional, gated by setting) ───────────────
+                        hook_score_val = None
+                        hook_reason_val = None
+                        if settings.hook_judge_enabled:
+                            try:
+                                from shorts_clipper.highlight_detection.hook_judge import HookJudge
+
+                                _hook_judge = HookJudge(settings)
+                                window_text = " ".join(
+                                    seg.text for seg in best_local_window
+                                )[:600]
+                                _verdict = _hook_judge.score(window_text)
+                                hook_score_val = _verdict.score
+                                hook_reason_val = _verdict.reason
+                                if not _verdict.ok:
+                                    log.warning(
+                                        "Hook judge rejected window (score=%.2f): %s — "
+                                        "keeping window anyway (fallback)",
+                                        _verdict.score,
+                                        _verdict.reason,
+                                    )
+                            except Exception as _hj_err:
+                                log.warning("Hook judge failed, proceeding: %s", _hj_err)
 
                         log.info("Generating counterfactual variants")
                         sim_engine = SimulationEngine()
@@ -253,6 +277,8 @@ def run(
                                 "confidence": sim_result.reports[
                                     sim_result.winner_id
                                 ].overall_confidence,
+                                "hook_score": hook_score_val,
+                                "hook_reason": hook_reason_val,
                             }
                         )
 
