@@ -48,6 +48,54 @@ class PublishingEngine:
         results: dict[str, PublishResult] = {}
         log.info(f"🚀 PublishingEngine started for {len(platforms)} platforms: {platforms}")
 
+        # ── Compliance gate (runs before any platform API call) ───────
+        settings = Settings.from_env()
+        if getattr(settings, "compliance_enabled", True):
+            try:
+                from shorts_clipper.compliance.gate import ComplianceBlocked, ComplianceGate
+
+                gate = ComplianceGate(settings)
+                cta_text = getattr(settings, "affiliate_cta_text", "")
+                verdict = gate.check(metadata.title, metadata.description, cta_text)
+
+                if getattr(settings, "compliance_auto_disclaimers", True):
+                    safe_desc, note = gate.suggest_description(
+                        metadata.description,
+                        is_finance=gate._rules.check_finance(
+                            f"{metadata.title}\n{metadata.description}\n{cta_text}"
+                        ),
+                        affiliate_enabled=getattr(settings, "affiliate_enabled", False),
+                    )
+                    if note:
+                        metadata = ClipMetadata(
+                            title=metadata.title,
+                            description=safe_desc,
+                            tags=metadata.tags,
+                            privacy_status=metadata.privacy_status,
+                            language=metadata.language,
+                        )
+
+                if verdict.level == "block":
+                    gate.write_block_report(video_path, metadata.title, metadata.description, verdict)
+                    log.error(
+                        "⛔ Compliance BLOCK: %s | reasons: %s",
+                        metadata.title,
+                        verdict.reasons,
+                    )
+                    raise ComplianceBlocked(
+                        f"Clip blocked by compliance gate: {'; '.join(verdict.reasons)}"
+                    )
+                elif verdict.level == "review":
+                    log.warning(
+                        "⚠️ Compliance REVIEW: %s | reasons: %s",
+                        metadata.title,
+                        verdict.reasons,
+                    )
+            except ComplianceBlocked:
+                raise
+            except Exception as exc:
+                log.warning("Compliance gate error (continuing): %s", exc)
+
         # Authenticate all publishers first (fail early)
         publishers = {}
         for platform_name in platforms:
@@ -78,7 +126,6 @@ class PublishingEngine:
         r2_key = None
         signed_url = None
         r2_storage = None
-        settings = Settings.from_env()
 
         for attempt in range(1, self.max_retries + 1):
             try:
