@@ -75,6 +75,9 @@ class Settings:
     stream_audio_energy_enabled: bool = True
     stream_energy_window_seconds: float = 1.0
     stream_energy_threshold: float = 0.15
+    bgm_mode: str = "off"
+    music_dir: Path = Path("D:/shorts_music")
+    bgm_volume: float = 0.30
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -242,4 +245,11 @@ class Settings:
             stream_audio_energy_enabled=stream_audio_energy_enabled,
             stream_energy_window_seconds=stream_energy_window_seconds,
             stream_energy_threshold=stream_energy_threshold,
+            bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
+            music_dir=Path(
+                _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"
+            ),
+            bgm_volume=float(
+                _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"
+            ),
         )

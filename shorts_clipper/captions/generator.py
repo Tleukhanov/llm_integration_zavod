@@ -323,6 +323,8 @@ def burn_subtitles(
     style_name: str = "default",
     banner_image: str | Path | None = None,
     banner_position: str = "bottom_left",
+    bgm_audio: str | Path | None = None,
+    bgm_volume: float = 0.30,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -343,6 +345,8 @@ def burn_subtitles(
         banner_image:   Optional partner banner image overlaid on the video.
         banner_position: Corner for the banner overlay
                         (bottom_left, bottom_right, top_left, top_right).
+        bgm_audio:      Optional background-music file mixed under the commentary.
+        bgm_volume:     Loudness of the background music (0.0-1.0).
 
     Returns:
         Path to the output video.
@@ -385,8 +389,46 @@ def burn_subtitles(
         if banner and not use_banner:
             log.warning("Affiliate banner image not found, skipping overlay: %s", banner)
 
+        music = Path(bgm_audio) if bgm_audio is not None else None
+        use_bgm = music is not None and music.is_file()
+        if music is not None and not use_bgm:
+            log.warning("BGM audio file not found, rendering clean commentary: %s", music)
+
         if use_banner:
             cmd.extend(["-i", str(banner)])
+
+        if use_bgm:
+            cmd.extend(["-i", str(music)])
+            bgm_index = 2 if use_banner else 1
+
+        if use_bgm:
+            # A single -filter_complex must carry BOTH the video chain and
+            # the audio mix (you cannot combine -vf and -filter_complex).
+            if use_banner:
+                overlay_x = "W-w-40" if "right" in banner_position else "40"
+                overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
+                vcomp = (
+                    f"[0:v]{vf}[v0];"
+                    f"[1:v]scale=200:-1[logo];"
+                    f"[v0][logo]overlay={overlay_x}:{overlay_y}[vout]"
+                )
+            else:
+                vcomp = f"[0:v]{vf}[vout]"
+
+            bgm_vol = float(bgm_volume)
+            bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
+            if pacing != 1.0:
+                audio_post = "atempo={},{}".format(pacing, ",".join(bgm_af))
+            else:
+                audio_post = ",".join(bgm_af)
+
+            bgm_part = f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]"
+            mix_part = (
+                f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+            )
+            filter_complex = f"{vcomp};{bgm_part};{mix_part}{audio_post}[aout]"
+            cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"])
+        elif use_banner:
             overlay_x = "W-w-40" if "right" in banner_position else "40"
             overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
             filter_complex = (
@@ -407,10 +449,10 @@ def burn_subtitles(
         else:
             cmd.extend(["-preset", preset])
 
+        audio_args = [] if use_bgm else ["-af", ",".join(af_parts)]
         cmd.extend(
-            [
-                "-af",
-                ",".join(af_parts),
+            audio_args
+            + [
                 "-c:a",
                 "aac",
                 "-b:a",
