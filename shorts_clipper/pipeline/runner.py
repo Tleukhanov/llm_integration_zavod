@@ -23,6 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from shorts_clipper.affiliate import (
+    auto_cta_text,
     build_affiliate_description,
     load_affiliate_partners,
     select_affiliate_partner,
@@ -511,6 +512,23 @@ def run(
                                 "bgm_volume": settings.bgm_volume,
                             }
 
+                ad_card_kwargs = {}
+                if settings.affiliate_ad_card and affiliate_partner is not None:
+                    # Burn_subtitles applies 1.15× pacing, so the rendered clip is
+                    # shorter than the trimmed window. Estimate output duration and
+                    # place the mid-roll card at a fraction of it.
+                    duration_est = duration / 1.15
+                    card_start = settings.affiliate_ad_start_fraction * duration_est
+                    ad_card_kwargs = {
+                        "ad_card_start": card_start,
+                        "ad_card_duration": settings.affiliate_ad_duration_sec,
+                        "ad_card_text": settings.affiliate_cta_text or auto_cta_text(
+                            affiliate_partner
+                        ),
+                    }
+                    if affiliate_partner.banner_path:
+                        ad_card_kwargs["ad_card_image"] = affiliate_partner.banner_path
+
                 burn_subtitles(
                     cropped_path,
                     precision_segments,
@@ -522,6 +540,7 @@ def run(
                     style_name=settings.subtitle_style,
                     **banner_kwargs,
                     **bgm_kwargs,
+                    **ad_card_kwargs,
                 )
 
                 try:

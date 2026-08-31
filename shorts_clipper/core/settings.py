@@ -71,6 +71,10 @@ class Settings:
     affiliate_partners_path: str = "affiliate_partners.json"
     affiliate_enabled: bool = False
     affiliate_banner_position: str = "bottom_left"
+    affiliate_ad_card: bool = False
+    affiliate_ad_start_fraction: float = 0.45
+    affiliate_ad_duration_sec: float = 4.0
+    affiliate_cta_text: str = ""
     subtitle_langs: list[str] = field(default_factory=lambda: ["ru", "en"])
     stream_audio_energy_enabled: bool = True
     stream_energy_window_seconds: float = 1.0
@@ -168,6 +172,30 @@ class Settings:
             "top_right",
         }:
             affiliate_banner_position = "bottom_left"
+
+        affiliate_ad_card = (
+            _env("SHORTS_AFFILIATE_AD_CARD", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            affiliate_ad_start_fraction = float(
+                _env("SHORTS_AFFILIATE_AD_START_FRACTION", file_values, "0.45") or "0.45"
+            )
+        except ValueError:
+            affiliate_ad_start_fraction = 0.45
+        if not 0.0 <= affiliate_ad_start_fraction <= 1.0:
+            affiliate_ad_start_fraction = 0.45
+
+        try:
+            affiliate_ad_duration_sec = float(
+                _env("SHORTS_AFFILIATE_AD_DURATION_SEC", file_values, "4.0") or "4.0"
+            )
+        except ValueError:
+            affiliate_ad_duration_sec = 4.0
+        if affiliate_ad_duration_sec < 0:
+            affiliate_ad_duration_sec = 4.0
+
+        affiliate_cta_text = _env("SHORTS_AFFILIATE_CTA_TEXT", file_values, "") or ""
 
         subtitle_langs_raw = _env("SHORTS_SUBTITLE_LANGS", file_values, "ru,en") or "ru,en"
         subtitle_langs = [p.strip() for p in subtitle_langs_raw.split(",") if p.strip()]
@@ -282,6 +310,10 @@ class Settings:
             or "affiliate_partners.json",
             affiliate_enabled=affiliate_enabled,
             affiliate_banner_position=affiliate_banner_position,
+            affiliate_ad_card=affiliate_ad_card,
+            affiliate_ad_start_fraction=affiliate_ad_start_fraction,
+            affiliate_ad_duration_sec=affiliate_ad_duration_sec,
+            affiliate_cta_text=affiliate_cta_text,
             subtitle_langs=subtitle_langs,
             stream_audio_energy_enabled=stream_audio_energy_enabled,
             stream_energy_window_seconds=stream_energy_window_seconds,

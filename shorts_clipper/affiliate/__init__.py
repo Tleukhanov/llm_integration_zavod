@@ -2,6 +2,7 @@
 
 from shorts_clipper.affiliate.partners import (
     AffiliatePartner,
+    auto_cta_text,
     build_affiliate_description,
     load_affiliate_partners,
     select_affiliate_partner,
@@ -10,6 +11,7 @@ from shorts_clipper.affiliate.partners import (
 
 __all__ = [
     "AffiliatePartner",
+    "auto_cta_text",
     "build_affiliate_description",
     "load_affiliate_partners",
     "select_affiliate_partner",

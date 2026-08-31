@@ -325,6 +325,10 @@ def burn_subtitles(
     banner_position: str = "bottom_left",
     bgm_audio: str | Path | None = None,
     bgm_volume: float = 0.30,
+    ad_card_image: str | Path | None = None,
+    ad_card_text: str | None = None,
+    ad_card_start: float = 0.0,
+    ad_card_duration: float | None = None,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -347,6 +351,10 @@ def burn_subtitles(
                         (bottom_left, bottom_right, top_left, top_right).
         bgm_audio:      Optional background-music file mixed under the commentary.
         bgm_volume:     Loudness of the background music (0.0-1.0).
+        ad_card_image:  Optional big brand image shown as a timed mid-roll card.
+        ad_card_text:   Optional CTA text banner shown with the ad card.
+        ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
+        ad_card_duration: How long the card is visible (None => until end of clip).
 
     Returns:
         Path to the output video.
@@ -355,6 +363,13 @@ def burn_subtitles(
     output_path = Path(output_path)
 
     log.info("🎬 Burning subtitles via FFmpeg ASS filter...")
+
+    # Mid-roll ad card presence
+    ad_image = Path(ad_card_image) if ad_card_image else None
+    use_ad_image = ad_image is not None and ad_image.is_file()
+    if ad_image and not use_ad_image:
+        log.warning("Affiliate ad card image not found, skipping image overlay: %s", ad_image)
+    ad_text = ad_card_text if ad_card_text else None
 
     with tempfile.TemporaryDirectory(prefix="ass_") as tmp:
         ass_path = Path(tmp) / "subs.ass"
@@ -394,26 +409,66 @@ def burn_subtitles(
         if music is not None and not use_bgm:
             log.warning("BGM audio file not found, rendering clean commentary: %s", music)
 
+        # Extra inputs: 1 = corner banner, then ad card image, then bgm audio
+        input_idx = 1
         if use_banner:
             cmd.extend(["-i", str(banner)])
-
+            input_idx += 1
+        if use_ad_image:
+            cmd.extend(["-i", str(ad_image)])
+            ad_image_input = input_idx
+            input_idx += 1
+        else:
+            ad_image_input = None
         if use_bgm:
             cmd.extend(["-i", str(music)])
-            bgm_index = 2 if use_banner else 1
+            bgm_index = input_idx
+
+        # Drawtext font — use a Windows font but fallback to default if missing
+        fontfile = "C:/Windows/Fonts/arialbd.ttf"
+        font_arg = ""
+        if Path("C:/Windows/Fonts/arialbd.ttf").exists():
+            font_arg = f"fontfile='{fontfile.replace(':', '\\:')}':"
+
+        # Mid-roll ad card window; None => until end of clip (per-frame check)
+        ad_end = ad_card_start + ad_card_duration if ad_card_duration is not None else 999999.0
+
+        # Any video overlay (banner, ad card image, or drawtext CTA)?
+        video_overlay = use_banner or use_ad_image or bool(ad_text)
 
         if use_bgm:
-            # A single -filter_complex must carry BOTH the video chain and
-            # the audio mix (you cannot combine -vf and -filter_complex).
+            # A single -filter_complex must carry BOTH the video chain (with any
+            # overlays) and the audio mix (you cannot combine -vf and -filter_complex).
+            parts = [f"[0:v]{vf}[v0]"]
+            current = "v0"
+
             if use_banner:
+                parts.append("[1:v]scale=200:-1[logo]")
                 overlay_x = "W-w-40" if "right" in banner_position else "40"
                 overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
-                vcomp = (
-                    f"[0:v]{vf}[v0];"
-                    f"[1:v]scale=200:-1[logo];"
-                    f"[v0][logo]overlay={overlay_x}:{overlay_y}[vout]"
+                parts.append(f"[{current}][logo]overlay={overlay_x}:{overlay_y}[v1]")
+                current = "v1"
+
+            if use_ad_image:
+                parts.append(f"[{ad_image_input}:v]scale=-2:'min(ih,300)'[card]")
+                parts.append(
+                    f"[{current}][card]overlay=(W-w)/2:H-h-320:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[v2]"
+                )
+                current = "v2"
+
+            if ad_text:
+                text_path = Path(tmp) / "ad_text.txt"
+                text_path.write_text(ad_text, encoding="utf-8")
+                text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
+                parts.append(
+                    f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
+                    f"fontsize=H/20:fontcolor=white:box=1:boxcolor=black@0.6:"
+                    f"boxborderw=24:x=(w-text_w)/2:y=H-h-150:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
                 )
             else:
-                vcomp = f"[0:v]{vf}[vout]"
+                parts.append(f"[{current}][vout]")
 
             bgm_vol = float(bgm_volume)
             bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
@@ -422,20 +477,48 @@ def burn_subtitles(
             else:
                 audio_post = ",".join(bgm_af)
 
-            bgm_part = f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]"
-            mix_part = (
+            parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
+            parts.append(
                 f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+                f"{audio_post}[aout]"
             )
-            filter_complex = f"{vcomp};{bgm_part};{mix_part}{audio_post}[aout]"
+
+            filter_complex = ";".join(parts)
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"])
-        elif use_banner:
-            overlay_x = "W-w-40" if "right" in banner_position else "40"
-            overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
-            filter_complex = (
-                f"[0:v]{vf}[v0];"
-                f"[1:v]scale=200:-1[logo];"
-                f"[v0][logo]overlay={overlay_x}:{overlay_y}[vout]"
-            )
+        elif video_overlay:
+            parts = [f"[0:v]{vf}[v0]"]
+            current = "v0"
+
+            if use_banner:
+                parts.append("[1:v]scale=200:-1[logo]")
+                overlay_x = "W-w-40" if "right" in banner_position else "40"
+                overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
+                parts.append(f"[{current}][logo]overlay={overlay_x}:{overlay_y}[v1]")
+                current = "v1"
+
+            if use_ad_image:
+                parts.append(f"[{ad_image_input}:v]scale=-2:'min(ih,300)'[card]")
+                parts.append(
+                    f"[{current}][card]overlay=(W-w)/2:H-h-320:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[v2]"
+                )
+                current = "v2"
+
+            if ad_text:
+                text_path = Path(tmp) / "ad_text.txt"
+                text_path.write_text(ad_text, encoding="utf-8")
+                text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
+                parts.append(
+                    f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
+                    f"fontsize=H/20:fontcolor=white:box=1:boxcolor=black@0.6:"
+                    f"boxborderw=24:x=(w-text_w)/2:y=H-h-150:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
+                )
+            else:
+                parts.append(f"[{current}][vout]")
+
+            filter_complex = ";".join(parts)
+
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
         else:
             cmd.extend(["-vf", vf])
