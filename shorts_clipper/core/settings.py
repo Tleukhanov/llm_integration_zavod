@@ -75,6 +75,11 @@ class Settings:
     stream_audio_energy_enabled: bool = True
     stream_energy_window_seconds: float = 1.0
     stream_energy_threshold: float = 0.15
+    gameplay_mode: bool = False
+    gameplay_scan_max_seconds: int = 3600
+    gameplay_top_windows: int = 5
+    gameplay_min_length: float = 12.0
+    gameplay_max_length: float = 60.0
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -182,6 +187,42 @@ class Settings:
         except ValueError:
             stream_energy_threshold = 0.15
 
+        gameplay_mode = (
+            _env("SHORTS_GAMEPLAY_MODE", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            gameplay_scan_max_seconds = int(
+                _env("SHORTS_GAMEPLAY_SCAN_MAX_SECONDS", file_values, "3600") or "3600"
+            )
+        except ValueError:
+            gameplay_scan_max_seconds = 3600
+        if gameplay_scan_max_seconds < 0:
+            gameplay_scan_max_seconds = 3600
+
+        try:
+            gameplay_top_windows = int(
+                _env("SHORTS_GAMEPLAY_TOP_WINDOWS", file_values, "5") or "5"
+            )
+        except ValueError:
+            gameplay_top_windows = 5
+        if gameplay_top_windows < 0:
+            gameplay_top_windows = 5
+
+        try:
+            gameplay_min_length = float(
+                _env("SHORTS_GAMEPLAY_MIN_LENGTH", file_values, "12.0") or "12.0"
+            )
+        except ValueError:
+            gameplay_min_length = 12.0
+
+        try:
+            gameplay_max_length = float(
+                _env("SHORTS_GAMEPLAY_MAX_LENGTH", file_values, "60.0") or "60.0"
+            )
+        except ValueError:
+            gameplay_max_length = 60.0
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -242,4 +283,9 @@ class Settings:
             stream_audio_energy_enabled=stream_audio_energy_enabled,
             stream_energy_window_seconds=stream_energy_window_seconds,
             stream_energy_threshold=stream_energy_threshold,
+            gameplay_mode=gameplay_mode,
+            gameplay_scan_max_seconds=gameplay_scan_max_seconds,
+            gameplay_top_windows=gameplay_top_windows,
+            gameplay_min_length=gameplay_min_length,
+            gameplay_max_length=gameplay_max_length,
         )

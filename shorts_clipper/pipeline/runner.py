@@ -28,7 +28,7 @@ from shorts_clipper.affiliate import (
     select_affiliate_transcript_text,
 )
 from shorts_clipper.captions.generator import burn_subtitles
-from shorts_clipper.core.exceptions import MediaProcessingError
+from shorts_clipper.core.exceptions import MediaProcessingError, SUBTITLE_NOT_AVAILABLE
 from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.settings import Settings
 from shorts_clipper.downloader.yt_dlp import (
@@ -117,140 +117,196 @@ def run(
                 log.info("\n--- PASS 1: ROUGH TRANSCRIPT FOR AI SELECTION ---")
                 if progress_callback:
                     progress_callback(10)
-                rough_segments = fetch_subtitles(url, work_path)
 
-                if not rough_segments:
-                    log.warning(
-                        "⚠️  No native subtitles. Downloading 5-min audio sample for rough transcript..."
-                    )
-                    audio_path = work_path / "rough_audio.m4a"
-                    download_audio(url, audio_path, start_time=0.0, end_time=300.0)
-                    rough_segments = transcribe_clip(audio_path)
-
-                from shorts_clipper.attention.engine import SimulationEngine
-                from shorts_clipper.core.models import ClipWindow
-                from shorts_clipper.highlight_detection.scoring import SemanticCandidateGenerator
-
+                # Subtitles may be entirely absent (e.g. CS2/CS:GO VODs). Treat
+                # SUBTITLE_NOT_AVAILABLE as empty segments instead of killing the run.
                 try:
-                    log.info("Generating semantic candidates")
-                    generator = SemanticCandidateGenerator()
-                    candidate_generation_score, best_local_window, reasoning = (
-                        generator.generate_candidate(rough_segments)
+                    rough_segments = fetch_subtitles(url, work_path)
+                except SUBTITLE_NOT_AVAILABLE as exc:
+                    log.warning("⚠️  Subtitles unavailable: %s. Continuing without them.", exc)
+                    rough_segments = []
+
+                if settings.gameplay_mode:
+                    # ── GAMEPLAY MODE: select clip windows by AUDIO ENERGY ──
+                    log.info(
+                        "🎮 GAMEPLAY MODE ENABLED — selecting clip windows by audio energy "
+                        "instead of subtitles."
+                    )
+                    audio_path = work_path / "gameplay_audio.m4a"
+                    download_audio(
+                        url,
+                        audio_path,
+                        start_time=0.0,
+                        end_time=settings.gameplay_scan_max_seconds,
                     )
 
-                    if not best_local_window:
+                    from shorts_clipper.attention.gameplay import windows_from_audio
+                    from shorts_clipper.core.models import ClipWindow
+
+                    log.info(
+                        "Skipping SemanticCandidateGenerator in gameplay mode "
+                        "(no subtitle-based semantic pass)."
+                    )
+                    energy_windows = windows_from_audio(
+                        audio_path, settings.gameplay_scan_max_seconds, settings
+                    )
+                    if not energy_windows:
                         raise MediaProcessingError(
-                            "Semantic Candidate Generator failed to find a valid window."
+                            "No energetic windows found in gameplay mode. "
+                            "The audio may be silent or below the energy threshold."
                         )
 
-                    log.info("Generating counterfactual variants")
-                    sim_engine = SimulationEngine()
-                    log.info("Running attention simulation")
-                    sim_result = sim_engine.optimize_clip(best_local_window)
-
-                    log.info("Selecting optimal narrative")
-                    winner_variant = next(
-                        (v for v in sim_result.variants if v.variant_id == sim_result.winner_id),
-                        sim_result.base_variant,
-                    )
-
-                    # Log artifacts
-                    from dataclasses import asdict
-
-                    def safe_asdict(obj):
-                        try:
-                            # Convert enums to string
-                            data = asdict(obj)
-
-                            def recursive_enum_to_str(d):
-                                if isinstance(d, dict):
-                                    for k, v in d.items():
-                                        if hasattr(v, "value"):
-                                            d[k] = v.value
-                                        else:
-                                            recursive_enum_to_str(v)
-                                elif isinstance(d, list):
-                                    for i in range(len(d)):
-                                        if hasattr(d[i], "value"):
-                                            d[i] = d[i].value
-                                        else:
-                                            recursive_enum_to_str(d[i])
-
-                            recursive_enum_to_str(data)
-                            return data
-                        except Exception:
-                            return str(obj)
+                    # windows_from_audio returns best-energy-first; reorder by start for
+                    # deterministic downstream processing and preselect by count.
+                    energy_windows.sort(key=lambda w: w.start)
+                    gameplay_clips = [
+                        (ClipWindow(start=w.start, end=w.end), "center")
+                        for w in energy_windows
+                    ]
+                    clips.extend(gameplay_clips[: count - len(clips)])
 
                     run_ctx.add_decision_trace(
                         {
-                            "video_url": url,
-                            "candidate_windows": [
-                                {"start": s.start, "end": s.end} for s in best_local_window
+                            "mode": "gameplay",
+                            "energy_windows": [
+                                {"start": w.start, "end": w.end} for w in energy_windows
                             ],
-                            "semantic_score": candidate_generation_score,
-                            "winner_variant_id": sim_result.winner_id,
-                            "winner_reason": sim_result.reason,
-                            "runner_up": None,  # Could extract if needed
-                            "confidence": sim_result.reports[
-                                sim_result.winner_id
-                            ].overall_confidence,
                         }
                     )
+                else:
+                    if not rough_segments:
+                        log.warning(
+                            "⚠️  No native subtitles. Downloading 5-min audio sample for rough transcript..."
+                        )
+                        audio_path = work_path / "rough_audio.m4a"
+                        download_audio(url, audio_path, start_time=0.0, end_time=300.0)
+                        rough_segments = transcribe_clip(audio_path)
 
-                    from shorts_clipper.core.stats import get_optimizer_stats
+                    from shorts_clipper.attention.engine import SimulationEngine
+                    from shorts_clipper.core.models import ClipWindow
+                    from shorts_clipper.highlight_detection.scoring import SemanticCandidateGenerator
 
-                    optimizer_stats = get_optimizer_stats()
-                    optimizer_stats.record_run(
-                        sim_result.winner_id,
-                        sim_result.reports[sim_result.winner_id].overall_confidence,
-                        len(sim_result.variants),
-                        sim_result.runner_up_id,
-                        sim_result.improvement_percentage,
-                    )
+                    try:
+                        log.info("Generating semantic candidates")
+                        generator = SemanticCandidateGenerator()
+                        candidate_generation_score, best_local_window, reasoning = (
+                            generator.generate_candidate(rough_segments)
+                        )
 
-                    run_ctx.add_attention_report(
-                        "clip_1", safe_asdict(sim_result.reports[sim_result.winner_id])
-                    )
-                    run_ctx.add_variant(safe_asdict(sim_result))
+                        if not best_local_window:
+                            raise MediaProcessingError(
+                                "Semantic Candidate Generator failed to find a valid window."
+                            )
 
-                    # Score Breakdown
-                    run_ctx.add_score_breakdown(
-                        "clip_1",
-                        {
-                            "Narrative Score": candidate_generation_score,
-                            "Final Editorial Score": sim_result.reports[
-                                sim_result.winner_id
-                            ].completion_prob
-                            * 100.0,
-                            "judge_results": {
-                                k: v.score
-                                for k, v in sim_result.reports[
+                        log.info("Generating counterfactual variants")
+                        sim_engine = SimulationEngine()
+                        log.info("Running attention simulation")
+                        sim_result = sim_engine.optimize_clip(best_local_window)
+
+                        log.info("Selecting optimal narrative")
+                        winner_variant = next(
+                            (v for v in sim_result.variants if v.variant_id == sim_result.winner_id),
+                            sim_result.base_variant,
+                        )
+
+                        # Log artifacts
+                        from dataclasses import asdict
+
+                        def safe_asdict(obj):
+                            try:
+                                # Convert enums to string
+                                data = asdict(obj)
+
+                                def recursive_enum_to_str(d):
+                                    if isinstance(d, dict):
+                                        for k, v in d.items():
+                                            if hasattr(v, "value"):
+                                                d[k] = v.value
+                                            else:
+                                                recursive_enum_to_str(v)
+                                    elif isinstance(d, list):
+                                        for i in range(len(d)):
+                                            if hasattr(d[i], "value"):
+                                                d[i] = d[i].value
+                                            else:
+                                                recursive_enum_to_str(d[i])
+
+                                recursive_enum_to_str(data)
+                                return data
+                            except Exception:
+                                return str(obj)
+
+                        run_ctx.add_decision_trace(
+                            {
+                                "mode": "subtitles",
+                                "video_url": url,
+                                "candidate_windows": [
+                                    {"start": s.start, "end": s.end} for s in best_local_window
+                                ],
+                                "semantic_score": candidate_generation_score,
+                                "winner_variant_id": sim_result.winner_id,
+                                "winner_reason": sim_result.reason,
+                                "runner_up": None,  # Could extract if needed
+                                "confidence": sim_result.reports[
                                     sim_result.winner_id
-                                ].judge_results.items()
+                                ].overall_confidence,
+                            }
+                        )
+
+                        from shorts_clipper.core.stats import get_optimizer_stats
+
+                        optimizer_stats = get_optimizer_stats()
+                        optimizer_stats.record_run(
+                            sim_result.winner_id,
+                            sim_result.reports[sim_result.winner_id].overall_confidence,
+                            len(sim_result.variants),
+                            sim_result.runner_up_id,
+                            sim_result.improvement_percentage,
+                        )
+
+                        run_ctx.add_attention_report(
+                            "clip_1", safe_asdict(sim_result.reports[sim_result.winner_id])
+                        )
+                        run_ctx.add_variant(safe_asdict(sim_result))
+
+                        # Score Breakdown
+                        run_ctx.add_score_breakdown(
+                            "clip_1",
+                            {
+                                "Narrative Score": candidate_generation_score,
+                                "Final Editorial Score": sim_result.reports[
+                                    sim_result.winner_id
+                                ].completion_prob
+                                * 100.0,
+                                "judge_results": {
+                                    k: v.score
+                                    for k, v in sim_result.reports[
+                                        sim_result.winner_id
+                                    ].judge_results.items()
+                                },
                             },
-                        },
-                    )
+                        )
 
-                    # Editorial Summary Markdown
-                    editorial_md = f"""# Editorial Decision for Clip 1
-## Why THIS clip?
-{sim_result.reason}
+                        # Editorial Summary Markdown
+                        editorial_md = f"""# Editorial Decision for Clip 1
+        ## Why THIS clip?
+        {sim_result.reason}
 
-## Key Metrics
-- **Completion Probability:** {sim_result.reports[sim_result.winner_id].completion_prob:.2f}
-- **Scroll Stop Probability:** {sim_result.reports[sim_result.winner_id].scroll_stop_prob:.2f}
-- **Payoff Strength:** {sim_result.reports[sim_result.winner_id].payoff_strength:.2f}
-"""
-                    run_ctx.set_editorial_summary("clip_1", editorial_md)
+        ## Key Metrics
+        - **Completion Probability:** {sim_result.reports[sim_result.winner_id].completion_prob:.2f}
+        - **Scroll Stop Probability:** {sim_result.reports[sim_result.winner_id].scroll_stop_prob:.2f}
+        - **Payoff Strength:** {sim_result.reports[sim_result.winner_id].payoff_strength:.2f}
+        """
+                        run_ctx.set_editorial_summary("clip_1", editorial_md)
 
-                    new_clip_window = ClipWindow(
-                        start=winner_variant.start_time, end=winner_variant.end_time
-                    )
-                    clips.extend([(new_clip_window, "center")])
+                        new_clip_window = ClipWindow(
+                            start=winner_variant.start_time, end=winner_variant.end_time
+                        )
+                        clips.extend([(new_clip_window, "center")])
 
-                except Exception as exc:
-                    log.error("Simulation Engine selection failed: %s", exc)
-                    raise MediaProcessingError("No high-quality highlights found.") from exc
+                    except Exception as exc:
+                        log.error("Simulation Engine selection failed: %s", exc)
+                        raise MediaProcessingError("No high-quality highlights found.") from exc
 
             output_paths: list[Path] = []
 
