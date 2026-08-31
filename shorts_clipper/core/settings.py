@@ -89,6 +89,11 @@ class Settings:
     bgm_volume: float = 0.30
     hook_judge_enabled: bool = False
     hook_min_score: float = 0.5
+    compliance_enabled: bool = True
+    compliance_llm: bool = True
+    compliance_finance_strict: bool = False
+    compliance_auto_disclaimers: bool = True
+    compliance_report_dir: Path = Path("outputs/compliance")
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -231,6 +236,27 @@ class Settings:
         except ValueError:
             stream_energy_threshold = 0.15
 
+        compliance_enabled = (
+            _env("SHORTS_COMPLIANCE_ENABLED", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        compliance_llm = (
+            _env("SHORTS_COMPLIANCE_LLM", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        compliance_finance_strict = (
+            _env("SHORTS_COMPLIANCE_FINANCE_STRICT", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        compliance_auto_disclaimers = (
+            _env("SHORTS_COMPLIANCE_AUTO_DISCLAIMERS", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        compliance_report_dir = Path(
+            _env("SHORTS_COMPLIANCE_REPORT_DIR", file_values, "outputs/compliance")
+            or "outputs/compliance"
+        )
+
         gameplay_mode = (
             _env("SHORTS_GAMEPLAY_MODE", file_values, "false") or "false"
         ).lower() in {"1", "true", "yes", "on"}
@@ -345,4 +371,9 @@ class Settings:
             ),
             hook_judge_enabled=hook_judge_enabled,
             hook_min_score=hook_min_score,
+            compliance_enabled=compliance_enabled,
+            compliance_llm=compliance_llm,
+            compliance_finance_strict=compliance_finance_strict,
+            compliance_auto_disclaimers=compliance_auto_disclaimers,
+            compliance_report_dir=compliance_report_dir,
         )
