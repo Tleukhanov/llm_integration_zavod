@@ -323,6 +323,10 @@ def burn_subtitles(
     style_name: str = "default",
     banner_image: str | Path | None = None,
     banner_position: str = "bottom_left",
+    ad_card_image: str | Path | None = None,
+    ad_card_text: str | None = None,
+    ad_card_start: float = 0.0,
+    ad_card_duration: float | None = None,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -343,6 +347,10 @@ def burn_subtitles(
         banner_image:   Optional partner banner image overlaid on the video.
         banner_position: Corner for the banner overlay
                         (bottom_left, bottom_right, top_left, top_right).
+        ad_card_image:  Optional big brand image shown as a timed mid-roll card.
+        ad_card_text:   Optional CTA text banner shown with the ad card.
+        ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
+        ad_card_duration: How long the card is visible (None => until end of clip).
 
     Returns:
         Path to the output video.
@@ -351,6 +359,13 @@ def burn_subtitles(
     output_path = Path(output_path)
 
     log.info("🎬 Burning subtitles via FFmpeg ASS filter...")
+
+    # Mid-roll ad card presence
+    ad_image = Path(ad_card_image) if ad_card_image else None
+    use_ad_image = ad_image is not None and ad_image.is_file()
+    if ad_image and not use_ad_image:
+        log.warning("Affiliate ad card image not found, skipping image overlay: %s", ad_image)
+    ad_text = ad_card_text if ad_card_text else None
 
     with tempfile.TemporaryDirectory(prefix="ass_") as tmp:
         ass_path = Path(tmp) / "subs.ass"
@@ -385,15 +400,66 @@ def burn_subtitles(
         if banner and not use_banner:
             log.warning("Affiliate banner image not found, skipping overlay: %s", banner)
 
+        # Extra inputs: index 1 = corner banner, then ad card image
+        input_idx = 1
         if use_banner:
             cmd.extend(["-i", str(banner)])
-            overlay_x = "W-w-40" if "right" in banner_position else "40"
-            overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
-            filter_complex = (
-                f"[0:v]{vf}[v0];"
-                f"[1:v]scale=200:-1[logo];"
-                f"[v0][logo]overlay={overlay_x}:{overlay_y}[vout]"
-            )
+            input_idx += 1
+        if use_ad_image:
+            cmd.extend(["-i", str(ad_image)])
+            ad_image_input = input_idx
+        else:
+            ad_image_input = None
+
+        # Drawtext font — use a Windows font but fallback to default if missing
+        fontfile = "C:/Windows/Fonts/arialbd.ttf"
+        font_arg = ""
+        if Path("C:/Windows/Fonts/arialbd.ttf").exists():
+            font_arg = f"fontfile='{fontfile.replace(':', '\\:')}':"
+
+        # Build mid-roll ad card filter pieces
+        # end time = start + duration, or a very large number if None (until end of clip)
+        ad_end = ad_card_start + ad_card_duration if ad_card_duration is not None else 999999.0
+
+        # vf chain points into the video stream; produce an output label on the
+        # last element. track labels dynamically based on what tails the chain.
+        if use_banner or use_ad_image or ad_text:
+            # We need a filter_complex whenever we overlay an image or drawtext.
+            parts = [f"[0:v]{vf}[v0]"]
+            current = "v0"
+
+            if use_banner:
+                parts.append("[1:v]scale=200:-1[logo]")
+                overlay_x = "W-w-40" if "right" in banner_position else "40"
+                overlay_y = "40" if banner_position.startswith("top") else "H-h-300"
+                parts.append(f"[{current}][logo]overlay={overlay_x}:{overlay_y}[v1]")
+                current = "v1"
+
+            if use_ad_image:
+                parts.append(f"[{ad_image_input}:v]scale=-2:'min(ih,300)'[card]")
+                parts.append(
+                    f"[{current}][card]overlay=(W-w)/2:H-h-320:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[v2]"
+                )
+                current = "v2"
+
+            if ad_text:
+                # Write the CTA text to a temp UTF-8 file (avoids shell quoting issues)
+                text_path = Path(tmp) / "ad_text.txt"
+                text_path.write_text(ad_text, encoding="utf-8")
+                text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
+                parts.append(
+                    f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
+                    f"fontsize=H/20:fontcolor=white:box=1:boxcolor=black@0.6:"
+                    f"boxborderw=24:x=(w-text_w)/2:y=H-h-150:"
+                    f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
+                )
+            else:
+                # No drawtext: rename the final label to the output label [vout]
+                parts.append(f"[{current}][vout]")
+
+            filter_complex = ";".join(parts)
+
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
         else:
             cmd.extend(["-vf", vf])

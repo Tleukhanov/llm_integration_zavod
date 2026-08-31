@@ -111,6 +111,11 @@ def select_affiliate_partner(
     return enabled[round_robin_index % len(enabled)]
 
 
+def auto_cta_text(partner: AffiliatePartner) -> str:
+    """Build a default CTA for a partner's mid-roll ad card."""
+    return f"{partner.name} — скины CS2, ссылка в описании"
+
+
 def build_affiliate_description(meta: dict, partner: AffiliatePartner, language: str) -> str:
     """Append the partner offer + link + disclosure tag to a description."""
     description = meta.get("description") or ""
