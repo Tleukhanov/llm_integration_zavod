@@ -277,6 +277,21 @@ def download_audio(
 
     if start_time is not None and end_time is not None:
         cmd.extend(["--download-sections", f"*{start_time}-{end_time}"])
+        # Partial downloads require ffmpeg to cut and merge segments. Point
+        # yt-dlp at the bundled imageio-ffmpeg binary so it does not fail with
+        # "ffmpeg is not installed" in environments without a system ffmpeg.
+        # The bundled binary has a versioned name, so stage it under the
+        # generic `ffmpeg.exe` name that yt-dlp looks for.
+        try:
+            src_ffmpeg = Path(ffmpeg_path()).resolve()
+            ffmpeg_dir = _ffmpegwrapper_dir(src_ffmpeg)
+            cmd.extend(["--ffmpeg-location", str(ffmpeg_dir)])
+        except RuntimeError as exc:
+            log.warning("ffmpeg not available for partial download: %s", exc)
+        # ffmpeg doesn't support curl_cffi impersonation, which causes 403s
+        if "--impersonate" in cmd:
+            idx = cmd.index("--impersonate")
+            del cmd[idx : idx + 2]
 
     cmd.extend(["--", url])
 
