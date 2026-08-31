@@ -75,6 +75,8 @@ class Settings:
     stream_audio_energy_enabled: bool = True
     stream_energy_window_seconds: float = 1.0
     stream_energy_threshold: float = 0.15
+    hook_judge_enabled: bool = False
+    hook_min_score: float = 0.5
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -168,6 +170,17 @@ class Settings:
             _env("SHORTS_STREAM_AUDIO_ENERGY", file_values, "true") or "true"
         ).lower() in {"1", "true", "yes", "on"}
 
+        hook_judge_enabled = (
+            _env("SHORTS_HOOK_JUDGE_ENABLED", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            hook_min_score = float(
+                _env("SHORTS_HOOK_MIN_SCORE", file_values, "0.5") or "0.5"
+            )
+        except ValueError:
+            hook_min_score = 0.5
+
         try:
             stream_energy_window_seconds = float(
                 _env("SHORTS_STREAM_ENERGY_WINDOW", file_values, "1.0") or "1.0"
@@ -242,4 +255,6 @@ class Settings:
             stream_audio_energy_enabled=stream_audio_energy_enabled,
             stream_energy_window_seconds=stream_energy_window_seconds,
             stream_energy_threshold=stream_energy_threshold,
+            hook_judge_enabled=hook_judge_enabled,
+            hook_min_score=hook_min_score,
         )
