@@ -325,6 +325,7 @@ def burn_subtitles(
     banner_position: str = "bottom_left",
     bgm_audio: str | Path | None = None,
     bgm_volume: float = 0.30,
+    bgm_music_forward: bool = False,
     ad_card_image: str | Path | None = None,
     ad_card_text: str | None = None,
     ad_card_start: float = 0.0,
@@ -351,6 +352,9 @@ def burn_subtitles(
                         (bottom_left, bottom_right, top_left, top_right).
         bgm_audio:      Optional background-music file mixed under the commentary.
         bgm_volume:     Loudness of the background music (0.0-1.0).
+        bgm_music_forward: Music-forward mix for hype/gameplay clips — BGM is
+                        mixed on top of an attenuated bed instead of averaged
+                        under it, so the track is clearly audible.
         ad_card_image:  Optional big brand image shown as a timed mid-roll card.
         ad_card_text:   Optional CTA text banner shown with the ad card.
         ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
@@ -477,11 +481,22 @@ def burn_subtitles(
             else:
                 audio_post = ",".join(bgm_af)
 
-            parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
-            parts.append(
-                f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
-                f"{audio_post}[aout]"
-            )
+            if bgm_music_forward:
+                # Music-forward for hype clips: `amix:normalize=0` does NOT halve
+                # the music like the default averaged mix, the bed is ducked to
+                # 0.55 to make room, and a final limiter stops post-mix clipping.
+                parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
+                parts.append("[0:a]volume=0.550[prog]")
+                parts.append(
+                    f"[prog][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
+                    f"[mix]{audio_post},alimiter=limit=0.97[aout]"
+                )
+            else:
+                parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
+                parts.append(
+                    f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+                    f"{audio_post}[aout]"
+                )
 
             filter_complex = ";".join(parts)
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"])

@@ -1,4 +1,4 @@
-"""Main pipeline runner — the orchestration brain.
+﻿"""Main pipeline runner — the orchestration brain.
 
 Wires together every module into a single clean flow:
   Scout → Subtitles → Gemini → Download → Crop → Burn Subs → Output
@@ -150,7 +150,6 @@ def run(
                         end_time=settings.gameplay_scan_max_seconds,
                     )
 
-                    from shorts_clipper.attention.gameplay import windows_from_audio
                     from shorts_clipper.core.models import ClipWindow
 
                     log.info(
@@ -159,28 +158,35 @@ def run(
                     )
 
                     clutch_mode = getattr(settings, "gameplay_clutch_mode", "energy")
+                    peaks_by_start: dict[float, float] = {}
                     if clutch_mode == "emotion":
                         from shorts_clipper.attention.emotion import (
-                            windows_from_audio_emotion,
+                            windows_and_peaks_from_audio,
                         )
 
                         log.info(
                             "🎭 CLUTCH MODE: emotion — using caster-excitement detection."
                         )
-                        energy_windows = windows_from_audio_emotion(
+                        window_pairs = windows_and_peaks_from_audio(
                             audio_path, settings.gameplay_scan_max_seconds, settings
                         )
                     else:
-                        energy_windows = windows_from_audio(
+                        from shorts_clipper.attention.gameplay import (
+                            windows_and_peaks_from_audio,
+                        )
+
+                        window_pairs = windows_and_peaks_from_audio(
                             audio_path, settings.gameplay_scan_max_seconds, settings
                         )
+                    energy_windows = [w for w, _ in window_pairs]
+                    peaks_by_start = {round(w.start, 2): p for w, p in window_pairs}
                     if not energy_windows:
                         raise MediaProcessingError(
                             "No energetic windows found in gameplay mode. "
                             "The audio may be silent or below the energy threshold."
                         )
 
-# windows_from_audio returns best-energy-first; reorder by start for
+                    # windows_and_peaks_from_audio returns best-score-first; reorder by start for
                     # deterministic downstream processing and preselect by count.
                     energy_windows.sort(key=lambda w: w.start)
                     gameplay_clips = [
@@ -194,7 +200,12 @@ def run(
                             "mode": "gameplay",
                             "clutch_mode": clutch_mode,
                             "energy_windows": [
-                                {"start": w.start, "end": w.end} for w in energy_windows
+                                {
+                                    "start": w.start,
+                                    "end": w.end,
+                                    "peak": peaks_by_start.get(round(w.start, 2)),
+                                }
+                                for w in energy_windows
                             ],
                         }
                     )
@@ -430,9 +441,18 @@ def run(
                 if settings.gameplay_mode:
                     from shorts_clipper.attention.gameplay import cap_to_target
 
-                    center_seconds = (
-                        (window.start - buffered_start) + (window.end - buffered_start)
-                    ) / 2.0
+                    peak_abs = peaks_by_start.get(round(window.start, 2))
+                    if peak_abs is not None:
+                        center_seconds = peak_abs - buffered_start
+                        log.info(
+                            "⛳ Anchor clip cap on peak excitement @ %.2fs (window 0.00s→%.2fs)",
+                            peak_abs,
+                            peak_abs,
+                        )
+                    else:
+                        center_seconds = (
+                            (window.start - buffered_start) + (window.end - buffered_start)
+                        ) / 2.0
                     final_window = cap_to_target(
                         final_window,
                         center_seconds,
@@ -590,10 +610,26 @@ def run(
                         track = pick_track(settings.music_dir, run_seed, last_track)
                         if track is not None:
                             last_track = track
-                            log.info("🎵 BGM for clip %d: %s (mode=%s)", idx, track, settings.bgm_mode)
+                            music_forward = settings.gameplay_mode and getattr(
+                                settings, "gameplay_music_forward", True
+                            )
+                            bgm_vol = settings.bgm_volume
+                            if music_forward:
+                                # Hype/gameplay clips: keep the track clearly
+                                # audible even if the user left the default (0.30).
+                                bgm_vol = max(bgm_vol, 0.5)
+                            log.info(
+                                "🎵 BGM for clip %d: %s (mode=%s, music-forward=%s, vol=%.2f)",
+                                idx,
+                                track,
+                                settings.bgm_mode,
+                                music_forward,
+                                bgm_vol,
+                            )
                             bgm_kwargs = {
                                 "bgm_audio": track,
-                                "bgm_volume": settings.bgm_volume,
+                                "bgm_volume": bgm_vol,
+                                "bgm_music_forward": music_forward,
                             }
 
                 ad_card_kwargs = {}

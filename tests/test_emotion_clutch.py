@@ -9,10 +9,13 @@ from unittest import mock
 import numpy as np
 
 from shorts_clipper.attention.emotion import (
+    cluster_peaks,
     compute_excitement,
     select_emotion_windows,
+    windows_and_peaks_from_audio,
     windows_from_audio_emotion,
 )
+from shorts_clipper.core.models import ClipWindow
 from shorts_clipper.core.settings import Settings
 
 
@@ -121,6 +124,57 @@ class WindowsFromAudioEmotionTests(unittest.TestCase):
         windows_from_audio_emotion(Path("fake.m4a"), 60.0, self._settings())
         _, kwargs = mock_emotion.call_args
         self.assertEqual(kwargs["max_seconds"], 3600)
+
+    @mock.patch("shorts_clipper.attention.emotion.compute_excitement")
+    @mock.patch("shorts_clipper.attention.audio_energy.extract_audio_energy")
+    def test_and_peaks_returns_peaks_inside_windows(self, mock_energy, mock_emotion):
+        emo = [0.0] * 10 + [0.8] * 15 + [0.0] * 35
+        emo[15] = 1.0
+        mock_emotion.return_value = emo
+        mock_energy.return_value = [0.0] * 60
+        s = Settings(
+            gameplay_scan_max_seconds=3600,
+            gameplay_top_windows=5,
+            gameplay_min_length=12.0,
+            gameplay_max_length=15.0,
+        )
+        pairs = windows_and_peaks_from_audio(Path("fake.m4a"), 60.0, s)
+        self.assertEqual(len(pairs), 1)
+        window, peak = pairs[0]
+        self.assertEqual(window.start, 10.0)
+        self.assertEqual(window.end, 25.0)
+        self.assertEqual(peak, 15.5)
+        # The plain wrapper returns exactly the windows of the pairs.
+        self.assertEqual(
+            windows_from_audio_emotion(Path("fake.m4a"), 60.0, s),
+            [w for w, _ in pairs],
+        )
+
+
+class ClusterPeaksTests(unittest.TestCase):
+    def _win(self, start, end):
+        return ClipWindow(start=start, end=end)
+
+    def test_picks_argmax_second_inside_window(self):
+        signal = [0.1, 0.2, 0.4, 0.9, 0.3, 0.2, 0.1]
+        peaks = cluster_peaks(signal, [self._win(0.0, 7.0)], window_seconds=1.0)
+        self.assertEqual(peaks, [3.5])
+
+    def test_clamps_out_of_range_windows_to_signal_bounds(self):
+        signal = [0.1, 0.5, 0.9, 0.2]
+        peaks = cluster_peaks(signal, [self._win(10.0, 12.0)], window_seconds=1.0)
+        self.assertEqual(peaks, [3.5])
+        peaks = cluster_peaks(signal, [self._win(2.0, 20.0)], window_seconds=1.0)
+        self.assertEqual(peaks, [2.5])
+
+    def test_empty_signal_falls_back_to_window_center(self):
+        peaks = cluster_peaks([], [self._win(2.0, 6.0)], window_seconds=1.0)
+        self.assertEqual(peaks, [4.0])
+
+    def test_peak_uses_window_seconds_step(self):
+        signal = [0.1, 0.1, 0.1, 0.1, 0.9, 0.1]
+        peaks = cluster_peaks(signal, [self._win(1.0, 4.0)], window_seconds=0.5)
+        self.assertEqual(peaks, [2.25])
 
 
 class ComputeExcitementUnitTests(unittest.TestCase):
@@ -237,7 +291,7 @@ class RunnerRoutingTests(unittest.TestCase):
         )
         v_mock.side_effect = RuntimeError("stop-after-pass1")
 
-    def test_energy_mode_calls_windows_from_audio(self):
+    def test_energy_mode_calls_windows_and_peaks(self):
         mocks = self._mocks()
         mocks["fetch"].return_value = []
         self._wire_audio_mock(mocks["download_audio"])
@@ -246,9 +300,9 @@ class RunnerRoutingTests(unittest.TestCase):
 
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
-             mock.patch("shorts_clipper.attention.gameplay.windows_from_audio") as mock_wfa, \
-             mock.patch("shorts_clipper.attention.emotion.windows_from_audio_emotion") as mock_emo:
-            mock_wfa.return_value = [mock.Mock(start=10.0, end=40.0)]
+             mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
+             mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
+            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -258,7 +312,7 @@ class RunnerRoutingTests(unittest.TestCase):
             mock_wfa.assert_called_once()
             mock_emo.assert_not_called()
 
-    def test_emotion_mode_calls_windows_from_audio_emotion(self):
+    def test_emotion_mode_calls_windows_and_peaks(self):
         mocks = self._mocks()
         mocks["fetch"].return_value = []
         self._wire_audio_mock(mocks["download_audio"])
@@ -267,9 +321,9 @@ class RunnerRoutingTests(unittest.TestCase):
 
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
-             mock.patch("shorts_clipper.attention.gameplay.windows_from_audio") as mock_wfa, \
-             mock.patch("shorts_clipper.attention.emotion.windows_from_audio_emotion") as mock_emo:
-            mock_emo.return_value = [mock.Mock(start=10.0, end=40.0)]
+             mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
+             mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
+            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -290,8 +344,8 @@ class RunnerRoutingTests(unittest.TestCase):
 
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
-             mock.patch("shorts_clipper.attention.emotion.windows_from_audio_emotion") as mock_emo:
-            mock_emo.return_value = [mock.Mock(start=10.0, end=40.0)]
+             mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
+            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -313,8 +367,8 @@ class RunnerRoutingTests(unittest.TestCase):
 
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
-             mock.patch("shorts_clipper.attention.gameplay.windows_from_audio") as mock_wfa:
-            mock_wfa.return_value = [mock.Mock(start=10.0, end=40.0)]
+             mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
+            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):

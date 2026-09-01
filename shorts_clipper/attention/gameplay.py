@@ -12,6 +12,7 @@ import math
 from pathlib import Path
 
 from shorts_clipper.attention.audio_energy import extract_audio_energy
+from shorts_clipper.attention.emotion import cluster_peaks
 from shorts_clipper.core.models import ClipWindow
 
 
@@ -99,12 +100,13 @@ def select_energy_windows(
     return [window for _, window in kept[:top_n]]
 
 
-def windows_from_audio(
+def windows_and_peaks_from_audio(
     audio_path: Path,
     total_seconds: float,
     settings,
-) -> list[ClipWindow]:
-    """Extract energy from an audio file and turn the top windows into clips.
+) -> list[tuple[ClipWindow, float]]:
+    """Extract energy from audio; return the top windows AND the absolute peak
+    energy second within each window (anchor for a short "juice" slice).
 
     Args:
         audio_path: Path to a downloaded audio file (decodable by ffmpeg).
@@ -113,7 +115,8 @@ def windows_from_audio(
         settings: A Settings instance with the gameplay_* fields.
 
     Returns:
-        Top energy `ClipWindow`s sorted by aggregate energy descending.
+        Pairs of (ClipWindow, peak_absolute_seconds), sorted by aggregate energy
+        descending.  Empty when nothing energetic is found.
     """
     energy = extract_audio_energy(
         audio_path,
@@ -127,7 +130,16 @@ def windows_from_audio(
         max_length=settings.gameplay_max_length,
         top_n=settings.gameplay_top_windows,
     )
-    return windows
+    return list(zip(windows, cluster_peaks(energy, windows)))
+
+
+def windows_from_audio(
+    audio_path: Path,
+    total_seconds: float,
+    settings,
+) -> list[ClipWindow]:
+    """Top energy ``ClipWindow``s (windows only; see windows_and_peaks_from_audio)."""
+    return [w for w, _ in windows_and_peaks_from_audio(audio_path, total_seconds, settings)]
 
 
 def cap_to_target(

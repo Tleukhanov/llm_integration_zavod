@@ -86,6 +86,7 @@ class Settings:
     gameplay_max_length: float = 60.0
     gameplay_clutch_mode: str = "energy"
     gameplay_clip_seconds: float = 15.0
+    gameplay_music_forward: bool = True
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
     bgm_volume: float = 0.30
@@ -317,6 +318,10 @@ class Settings:
         if not 5.0 <= gameplay_clip_seconds <= 120.0:
             gameplay_clip_seconds = 15.0
 
+        gameplay_music_forward = (
+            _env("SHORTS_GAMEPLAY_MUSIC_FORWARD", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -388,6 +393,7 @@ class Settings:
             gameplay_max_length=gameplay_max_length,
             gameplay_clutch_mode=gameplay_clutch_mode,
             gameplay_clip_seconds=gameplay_clip_seconds,
+            gameplay_music_forward=gameplay_music_forward,
             bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
             music_dir=Path(
                 _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"

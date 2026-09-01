@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -33,7 +33,7 @@ class SubtitleGracefulTests(unittest.TestCase):
     @mock.patch("shorts_clipper.pipeline.runner.fetch_subtitles")
     @mock.patch("shorts_clipper.pipeline.runner.transcribe_clip")
     @mock.patch("shorts_clipper.pipeline.runner.download_audio")
-    @mock.patch("shorts_clipper.attention.gameplay.windows_from_audio")
+    @mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio")
     @mock.patch("shorts_clipper.pipeline.runner.download_clip")
     @mock.patch("shorts_clipper.pipeline.runner.process_to_vertical")
     def test_missing_subtitles_routes_to_gameplay_not_5min_fallback(
@@ -53,7 +53,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [ClipWindow(start=10.0, end=40.0)]
+        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0)]
         mock_transcribe.return_value = []  # must NOT be used in gameplay mode
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])
@@ -84,7 +84,7 @@ class SubtitleGracefulTests(unittest.TestCase):
     @mock.patch("shorts_clipper.pipeline.runner.fetch_subtitles")
     @mock.patch("shorts_clipper.pipeline.runner.transcribe_clip")
     @mock.patch("shorts_clipper.pipeline.runner.download_audio")
-    @mock.patch("shorts_clipper.attention.gameplay.windows_from_audio")
+    @mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio")
     @mock.patch("shorts_clipper.pipeline.runner.download_clip")
     @mock.patch("shorts_clipper.pipeline.runner.process_to_vertical")
     def test_gameplay_mode_bypasses_semantic_generation(
@@ -104,7 +104,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [ClipWindow(start=5.0, end=35.0)]
+        mock_windows.return_value = [(ClipWindow(start=5.0, end=35.0), 18.0)]
         mock_transcribe.return_value = []
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])
@@ -127,7 +127,7 @@ class SubtitleGracefulTests(unittest.TestCase):
     @mock.patch("shorts_clipper.pipeline.runner.fetch_subtitles")
     @mock.patch("shorts_clipper.pipeline.runner.transcribe_clip")
     @mock.patch("shorts_clipper.pipeline.runner.download_audio")
-    @mock.patch("shorts_clipper.attention.gameplay.windows_from_audio")
+    @mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio")
     @mock.patch("shorts_clipper.pipeline.runner.download_clip")
     @mock.patch("shorts_clipper.pipeline.runner.process_to_vertical")
     def test_subtitle_429_in_gameplay_mode_degrades_gracefully(
@@ -148,7 +148,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [ClipWindow(start=10.0, end=40.0)]
+        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0)]
         mock_transcribe.return_value = []  # must NOT be used in gameplay mode
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])
@@ -174,3 +174,4 @@ class SubtitleGracefulTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
