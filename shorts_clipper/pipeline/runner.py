@@ -31,7 +31,11 @@ from shorts_clipper.affiliate import (
 )
 from shorts_clipper.captions.generator import burn_subtitles
 from shorts_clipper.captions.music import pick_track, should_use_bgm
-from shorts_clipper.core.exceptions import MediaProcessingError, SUBTITLE_NOT_AVAILABLE
+from shorts_clipper.core.exceptions import (
+    MediaProcessingError,
+    SUBTITLE_NOT_AVAILABLE,
+    YOUTUBE_RATE_LIMIT_429,
+)
 from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.settings import Settings
 from shorts_clipper.downloader.yt_dlp import (
@@ -121,11 +125,14 @@ def run(
                 if progress_callback:
                     progress_callback(10)
 
-                # Subtitles may be entirely absent (e.g. CS2/CS:GO VODs). Treat
-                # SUBTITLE_NOT_AVAILABLE as empty segments instead of killing the run.
+                # Subtitles may be entirely absent (e.g. CS2/CS:GO VODs), or the
+                # subtitle endpoint may be rate-limited/throttled as an IP-level
+                # block. Treat either case as an empty rough transcript instead of
+                # killing the run: gameplay mode selects by audio energy anyway, and
+                # the non-gameplay path falls back to a 5-min audio sample below.
                 try:
                     rough_segments = fetch_subtitles(url, work_path)
-                except SUBTITLE_NOT_AVAILABLE as exc:
+                except (SUBTITLE_NOT_AVAILABLE, YOUTUBE_RATE_LIMIT_429) as exc:
                     log.warning("⚠️  Subtitles unavailable: %s. Continuing without them.", exc)
                     rough_segments = []
 
