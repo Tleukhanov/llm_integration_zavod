@@ -422,6 +422,23 @@ def run(
                     final_window.end,
                 )
 
+                # ── Cap gameplay windows to a Shorts-friendly length ──────────
+                # Sentence-boundary snapping can balloon a clip far past the
+                # selected energy/emotion window. Keep short attention-grabbing
+                # clips: center a gameplay_clip_seconds-wide slice on the
+                # original selection.
+                if settings.gameplay_mode:
+                    from shorts_clipper.attention.gameplay import cap_to_target
+
+                    center_seconds = (
+                        (window.start - buffered_start) + (window.end - buffered_start)
+                    ) / 2.0
+                    final_window = cap_to_target(
+                        final_window,
+                        center_seconds,
+                        settings.gameplay_clip_seconds,
+                    )
+
                 # Shift timestamps in precision_segments to account for trimming
                 trim_start = final_window.start
                 duration = final_window.end - final_window.start
