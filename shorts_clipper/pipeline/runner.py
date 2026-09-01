@@ -137,7 +137,7 @@ def run(
                     rough_segments = []
 
                 if settings.gameplay_mode:
-                    # ── GAMEPLAY MODE: select clip windows by AUDIO ENERGY ──
+                    # ── GAMEPLAY MODE: select clip windows by audio energy ──
                     log.info(
                         "🎮 GAMEPLAY MODE ENABLED — selecting clip windows by audio energy "
                         "instead of subtitles."
@@ -157,9 +157,23 @@ def run(
                         "Skipping SemanticCandidateGenerator in gameplay mode "
                         "(no subtitle-based semantic pass)."
                     )
-                    energy_windows = windows_from_audio(
-                        audio_path, settings.gameplay_scan_max_seconds, settings
-                    )
+
+                    clutch_mode = getattr(settings, "gameplay_clutch_mode", "energy")
+                    if clutch_mode == "emotion":
+                        from shorts_clipper.attention.emotion import (
+                            windows_from_audio_emotion,
+                        )
+
+                        log.info(
+                            "🎭 CLUTCH MODE: emotion — using caster-excitement detection."
+                        )
+                        energy_windows = windows_from_audio_emotion(
+                            audio_path, settings.gameplay_scan_max_seconds, settings
+                        )
+                    else:
+                        energy_windows = windows_from_audio(
+                            audio_path, settings.gameplay_scan_max_seconds, settings
+                        )
                     if not energy_windows:
                         raise MediaProcessingError(
                             "No energetic windows found in gameplay mode. "
@@ -178,6 +192,7 @@ def run(
                     run_ctx.add_decision_trace(
                         {
                             "mode": "gameplay",
+                            "clutch_mode": clutch_mode,
                             "energy_windows": [
                                 {"start": w.start, "end": w.end} for w in energy_windows
                             ],

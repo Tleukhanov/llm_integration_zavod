@@ -84,6 +84,7 @@ class Settings:
     gameplay_top_windows: int = 5
     gameplay_min_length: float = 12.0
     gameplay_max_length: float = 60.0
+    gameplay_clutch_mode: str = "energy"
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
     bgm_volume: float = 0.30
@@ -293,6 +294,12 @@ class Settings:
         except ValueError:
             gameplay_max_length = 60.0
 
+        gameplay_clutch_mode = (
+            _env("SHORTS_GAMEPLAY_CLUTCH_MODE", file_values, "energy") or "energy"
+        ).lower()
+        if gameplay_clutch_mode not in {"energy", "emotion"}:
+            gameplay_clutch_mode = "energy"
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -362,6 +369,7 @@ class Settings:
             gameplay_top_windows=gameplay_top_windows,
             gameplay_min_length=gameplay_min_length,
             gameplay_max_length=gameplay_max_length,
+            gameplay_clutch_mode=gameplay_clutch_mode,
             bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
             music_dir=Path(
                 _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"
