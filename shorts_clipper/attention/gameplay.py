@@ -128,3 +128,38 @@ def windows_from_audio(
         top_n=settings.gameplay_top_windows,
     )
     return windows
+
+
+def cap_to_target(
+    final_window: ClipWindow,
+    center_seconds: float,
+    target_seconds: float,
+) -> ClipWindow:
+    """Cap a window to at most ``target_seconds``, centered on ``center_seconds``.
+
+    The sentence-boundary finisher can balloon a gameplay clip far past the
+    selected energy/emotion window (e.g. a 49s selection -> 98s). This keeps
+    Shorts-friendy, attention-grabbing clips: take a ``target_seconds``-wide
+    slice centered on the original selection, then clamp inside ``final_window``.
+
+    Args:
+        final_window: Window the finisher produced (potentially oversized).
+        center_seconds: Center to focus the slice on (e.g. the original
+            selection center, in the same local coordinates as final_window).
+        target_seconds: Maximum finished length. <= 0 disables the cap.
+
+    Returns:
+        A copy of ``final_window`` when it already fits within target_seconds,
+        otherwise a window of at most target_seconds centered on center_seconds.
+    """
+    duration = final_window.end - final_window.start
+    if target_seconds <= 0 or duration <= target_seconds:
+        return final_window
+
+    half = target_seconds / 2.0
+    lo = max(final_window.start, center_seconds - half)
+    hi = lo + target_seconds
+    if hi > final_window.end:
+        hi = final_window.end
+        lo = max(final_window.start, hi - target_seconds)
+    return ClipWindow(start=lo, end=hi)

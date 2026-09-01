@@ -2,7 +2,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from shorts_clipper.attention.gameplay import select_energy_windows, windows_from_audio
+from shorts_clipper.attention.gameplay import (
+    cap_to_target,
+    select_energy_windows,
+    windows_from_audio,
+)
+from shorts_clipper.core.models import ClipWindow
 from shorts_clipper.core.settings import Settings
 
 
@@ -148,6 +153,7 @@ class GameplaySettingsParseTests(unittest.TestCase):
         self.assertEqual(s.gameplay_top_windows, 5)
         self.assertEqual(s.gameplay_min_length, 12.0)
         self.assertEqual(s.gameplay_max_length, 60.0)
+        self.assertEqual(s.gameplay_clip_seconds, 15.0)
 
     def test_env_parse(self):
         import os
@@ -159,6 +165,7 @@ class GameplaySettingsParseTests(unittest.TestCase):
         os.environ["SHORTS_GAMEPLAY_TOP_WINDOWS"] = "7"
         os.environ["SHORTS_GAMEPLAY_MIN_LENGTH"] = "8.0"
         os.environ["SHORTS_GAMEPLAY_MAX_LENGTH"] = "45.0"
+        os.environ["SHORTS_GAMEPLAY_CLIP_SECONDS"] = "12.0"
         try:
             s = Settings.from_env("_nonexistent.env")
             self.assertTrue(s.gameplay_mode)
@@ -166,6 +173,7 @@ class GameplaySettingsParseTests(unittest.TestCase):
             self.assertEqual(s.gameplay_top_windows, 7)
             self.assertEqual(s.gameplay_min_length, 8.0)
             self.assertEqual(s.gameplay_max_length, 45.0)
+            self.assertEqual(s.gameplay_clip_seconds, 12.0)
         finally:
             for key in (
                 "SHORTS_GAMEPLAY_MODE",
@@ -173,8 +181,66 @@ class GameplaySettingsParseTests(unittest.TestCase):
                 "SHORTS_GAMEPLAY_TOP_WINDOWS",
                 "SHORTS_GAMEPLAY_MIN_LENGTH",
                 "SHORTS_GAMEPLAY_MAX_LENGTH",
+                "SHORTS_GAMEPLAY_CLIP_SECONDS",
             ):
                 os.environ.pop(key, None)
+
+    def test_clip_seconds_clamped(self):
+        import os
+
+        from shorts_clipper.core.settings import Settings
+
+        os.environ["SHORTS_GAMEPLAY_CLIP_SECONDS"] = "500"
+        try:
+            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 15.0)
+        finally:
+            os.environ.pop("SHORTS_GAMEPLAY_CLIP_SECONDS", None)
+
+        os.environ["SHORTS_GAMEPLAY_CLIP_SECONDS"] = "1"
+        try:
+            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 15.0)
+        finally:
+            os.environ.pop("SHORTS_GAMEPLAY_CLIP_SECONDS", None)
+
+
+class CapToTargetTests(unittest.TestCase):
+    def test_keeps_window_when_within_target(self):
+        final = ClipWindow(start=10.0, end=24.0)  # 14s <= 15s target
+        capped = cap_to_target(final, center_seconds=17.0, target_seconds=15.0)
+        self.assertEqual(capped.start, 10.0)
+        self.assertEqual(capped.end, 24.0)
+
+    def test_caps_to_target_centered_on_selection(self):
+        # Selector picked 40..60 (local), finisher expanded to 30..100 (~70s).
+        final = ClipWindow(start=30.0, end=100.0)
+        capped = cap_to_target(final, center_seconds=50.0, target_seconds=15.0)
+        self.assertAlmostEqual(capped.duration, 15.0)
+        self.assertAlmostEqual(capped.start, 42.5)  # centered on 50.0
+        self.assertAlmostEqual(capped.end, 57.5)
+
+    def test_caps_near_right_edge_clamps(self):
+        # Center would push past final_window.end; clamp to the end edge.
+        final = ClipWindow(start=80.0, end=100.0)
+        capped = cap_to_target(final, center_seconds=99.0, target_seconds=15.0)
+        self.assertAlmostEqual(capped.end, 100.0)
+        self.assertAlmostEqual(capped.duration, 15.0)
+
+    def test_caps_near_left_edge_clamps(self):
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(final, center_seconds=1.0, target_seconds=15.0)
+        self.assertAlmostEqual(capped.start, 0.0)
+        self.assertAlmostEqual(capped.duration, 15.0)
+
+    def test_target_zero_disables_cap(self):
+        final = ClipWindow(start=10.0, end=80.0)
+        capped = cap_to_target(final, center_seconds=45.0, target_seconds=0.0)
+        self.assertEqual(capped.start, 10.0)
+        self.assertEqual(capped.end, 80.0)
+
+    def test_returns_same_object_when_not_capped(self):
+        final = ClipWindow(start=5.0, end=20.0)
+        capped = cap_to_target(final, center_seconds=12.5, target_seconds=15.0)
+        self.assertIs(capped, final)
 
 
 if __name__ == "__main__":
