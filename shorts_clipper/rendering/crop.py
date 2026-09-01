@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 _TARGET_W = 1080
 _TARGET_H = 1920
 
+_WIDE_W = 1920
+_WIDE_H = 1080
+
 
 def _build_crop_filter(src_w: int, src_h: int, layout: str) -> str:
     """Return an FFmpeg -vf / -filter_complex string for the requested layout."""
@@ -143,4 +146,132 @@ def process_to_vertical(
         raise RuntimeError(f"FFmpeg crop failed (exit {result.returncode})")
 
     log.info("✅ Vertical crop done → %s", output_path)
+    return output_path
+
+
+def _build_wide_crop_filter(src_w: int, src_h: int, layout: str) -> str:
+    """Return an FFmpeg -vf string for a 16:9 (1920×1080) wide crop."""
+    src_ratio = src_w / src_h
+    target_ratio = _WIDE_W / _WIDE_H
+
+    if layout == "crop_left":
+        scale_h = _WIDE_H
+        scale_w = max(_WIDE_W, round(_WIDE_H * src_ratio) // 2 * 2)
+        return f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:0:0,setsar=1"
+
+    if layout == "crop_right":
+        scale_h = _WIDE_H
+        scale_w = max(_WIDE_W, round(_WIDE_H * src_ratio) // 2 * 2)
+        x_offset = scale_w - _WIDE_W
+        return f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:{x_offset}:0,setsar=1"
+
+    # Default: crop_center — reuse compute_center_crop with wide targets
+    crop = compute_center_crop(
+        width=src_w,
+        height=src_h,
+        target_width=_WIDE_W,
+        target_height=_WIDE_H,
+    )
+    scale = max(_WIDE_W / crop.width, _WIDE_H / crop.height)
+    scaled_w = round(src_w * scale) // 2 * 2
+    scaled_h = round(src_h * scale) // 2 * 2
+    x = (scaled_w - _WIDE_W) // 2
+    y = (scaled_h - _WIDE_H) // 2
+    return f"scale={scaled_w}:{scaled_h},crop={_WIDE_W}:{_WIDE_H}:{x}:{y},setsar=1"
+
+
+def process_to_wide(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    layout: str = "crop_center",
+    crf: int = 28,
+    preset: str = "ultrafast",
+    video_codec: str = "libx264",
+    start_time: float | None = None,
+    duration: float | None = None,
+) -> Path:
+    """
+    Crop and scale a video to 1920×1080 wide (16:9) using pure FFmpeg.
+
+    Args:
+        input_path: Source video file.
+        output_path: Destination file (will be overwritten if it exists).
+        layout: crop_center | crop_left | crop_right.
+        crf: Constant rate factor (18 = near-lossless, 23 = default).
+        preset: FFmpeg x264 preset (fast / medium / slow).
+        video_codec: FFmpeg video encoder codec to use.
+        start_time: Optional seek offset in seconds.
+        duration: Optional max duration in seconds.
+
+    Returns:
+        Path to the output file.
+
+    Raises:
+        RuntimeError: If FFmpeg exits with a non-zero status.
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    meta = get_video_metadata(str(input_path))
+    vf = _build_wide_crop_filter(meta.width, meta.height, layout)
+
+    log.info(
+        "\n--- WIDE CROP [%s] %dx%d → %dx%d ---",
+        layout,
+        meta.width,
+        meta.height,
+        _WIDE_W,
+        _WIDE_H,
+    )
+
+    cmd = [
+        ffmpeg_path(),
+        "-y",
+    ]
+    if start_time is not None:
+        cmd.extend(["-ss", str(start_time)])
+    if duration is not None:
+        cmd.extend(["-t", str(duration)])
+
+    cmd.extend(
+        [
+            "-i",
+            str(input_path),
+            "-vf",
+            vf,
+            "-c:v",
+            video_codec,
+        ]
+    )
+
+    if video_codec == "libx264":
+        cmd.extend(["-crf", str(crf), "-preset", preset])
+    elif video_codec == "h264_nvenc":
+        cmd.extend(["-rc:v", "vbr", "-cq", str(crf), "-preset", preset])
+    else:
+        cmd.extend(["-preset", preset])
+
+    cmd.extend(
+        [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-use_editlist",
+            "0",
+            str(output_path),
+        ]
+    )
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        log.error("FFmpeg wide crop stderr:\n%s", result.stderr[-3000:])
+        raise RuntimeError(f"FFmpeg wide crop failed (exit {result.returncode})")
+
+    log.info("✅ Wide crop done → %s", output_path)
     return output_path

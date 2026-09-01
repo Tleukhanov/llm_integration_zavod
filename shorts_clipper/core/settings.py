@@ -94,6 +94,7 @@ class Settings:
     compliance_finance_strict: bool = False
     compliance_auto_disclaimers: bool = True
     compliance_report_dir: Path = Path("outputs/compliance")
+    output_aspect: str = "vertical"
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -257,6 +258,12 @@ class Settings:
             or "outputs/compliance"
         )
 
+        output_aspect = (
+            _env("SHORTS_OUTPUT_ASPECT", file_values, "vertical") or "vertical"
+        ).lower()
+        if output_aspect not in {"vertical", "wide", "both"}:
+            output_aspect = "vertical"
+
         gameplay_mode = (
             _env("SHORTS_GAMEPLAY_MODE", file_values, "false") or "false"
         ).lower() in {"1", "true", "yes", "on"}
@@ -376,4 +383,5 @@ class Settings:
             compliance_finance_strict=compliance_finance_strict,
             compliance_auto_disclaimers=compliance_auto_disclaimers,
             compliance_report_dir=compliance_report_dir,
+            output_aspect=output_aspect,
         )

@@ -46,7 +46,7 @@ from shorts_clipper.downloader.yt_dlp import (
 from shorts_clipper.pipeline.finisher import EditorialFinisher
 from shorts_clipper.providers.gemini import GeminiProvider
 from shorts_clipper.publishers import ClipMetadata, PublishingEngine
-from shorts_clipper.rendering.crop import process_to_vertical
+from shorts_clipper.rendering.crop import process_to_vertical, process_to_wide
 from shorts_clipper.scout.trending import get_trending_link
 from shorts_clipper.transcription.whisper import transcribe_clip
 
@@ -481,15 +481,34 @@ def run(
                 if progress_callback:
                     progress_callback(70)
                 cropped_path = clip_work_dir / "cropped.mp4"
-                process_to_vertical(
-                    micro_path,
-                    cropped_path,
-                    layout=layout,
-                    video_codec=settings.video_codec,
-                    preset=settings.video_preset,
-                    start_time=trim_start,
-                    duration=duration,
-                )
+                wide_cropped_path: Path | None = None
+                do_vertical = settings.output_aspect in ("vertical", "both")
+                do_wide = settings.output_aspect in ("wide", "both")
+
+                if do_vertical:
+                    process_to_vertical(
+                        micro_path,
+                        cropped_path,
+                        layout=layout,
+                        video_codec=settings.video_codec,
+                        preset=settings.video_preset,
+                        start_time=trim_start,
+                        duration=duration,
+                    )
+
+                # ── Step 3b: Wide crop (if requested) ───────────────────────
+                if do_wide:
+                    wide_cropped_path = clip_work_dir / "cropped_wide.mp4"
+                    log.info("\n--- WIDE CROP & TRIM ---")
+                    process_to_wide(
+                        micro_path,
+                        wide_cropped_path,
+                        layout=layout,
+                        video_codec=settings.video_codec,
+                        preset=settings.video_preset,
+                        start_time=trim_start,
+                        duration=duration,
+                    )
 
                 # ── Step 4: Burn subtitles + 1.15× pacing (single pass) ───────
                 log.info("\n--- BURNING SUBTITLES + PACING ---")
@@ -563,7 +582,7 @@ def run(
                         ad_card_kwargs["ad_card_image"] = affiliate_partner.banner_path
 
                 burn_subtitles(
-                    cropped_path,
+                    cropped_path if do_vertical else wide_cropped_path,
                     precision_segments,
                     start_offset=0.0,  # precision segments are relative to micro_clip
                     output_path=current_output_path,
@@ -575,6 +594,26 @@ def run(
                     **bgm_kwargs,
                     **ad_card_kwargs,
                 )
+
+                # ── Step 4b: Burn subtitles on wide variant (if both) ───────
+                wide_output_path: Path | None = None
+                if do_vertical and do_wide and wide_cropped_path is not None:
+                    wide_output_path = current_output_path.with_name(
+                        current_output_path.stem + "_wide" + current_output_path.suffix
+                    )
+                    burn_subtitles(
+                        wide_cropped_path,
+                        precision_segments,
+                        start_offset=0.0,
+                        output_path=wide_output_path,
+                        pacing=1.15,
+                        video_codec=settings.video_codec,
+                        preset=settings.video_preset,
+                        style_name=settings.subtitle_style,
+                        **banner_kwargs,
+                        **bgm_kwargs,
+                        **ad_card_kwargs,
+                    )
 
                 try:
                     from shorts_clipper.rendering.thumbnailer import extract_thumbnail
@@ -660,6 +699,8 @@ def run(
 
                 if current_output_path.exists():
                     shutil.copy2(current_output_path, run_dir / f"rendered_clip_{idx}.mp4")
+                if wide_output_path is not None and wide_output_path.exists():
+                    shutil.copy2(wide_output_path, run_dir / f"rendered_clip_{idx}_wide.mp4")
                 thumb_path = current_output_path.with_suffix(".jpg")
                 if thumb_path.exists():
                     shutil.copy2(thumb_path, run_dir / f"thumbnail_{idx}.jpg")
@@ -669,7 +710,11 @@ def run(
                     json_path = json_artifact_path  # Update json_path so publish_status writes to the artifact
 
                 output_paths.append(current_output_path)
+                if wide_output_path is not None:
+                    output_paths.append(wide_output_path)
                 log.info("✅ Clip %d ready at: %s", idx, current_output_path)
+                if wide_output_path is not None:
+                    log.info("✅ Clip %d wide ready at: %s", idx, wide_output_path)
 
                 if upload and platforms:
                     if progress_callback:
