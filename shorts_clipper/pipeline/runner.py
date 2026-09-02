@@ -373,6 +373,19 @@ def run(
             output_paths: list[Path] = []
             last_track: Path | None = None
 
+            if settings.bgm_mode != "off":
+                try:
+                    from shorts_clipper.downloader.music_scraper import ensure_phonk_tracks
+
+                    ensure_phonk_tracks(
+                        settings.music_dir,
+                        min_tracks=settings.phonk_min_tracks,
+                        fetch_count=settings.phonk_fetch_max_tracks,
+                        max_pages=settings.phonk_fetch_pages,
+                    )
+                except Exception as exc:
+                    log.warning("Phonk auto-fetch skipped: %s", exc)
+
             for idx, (window, layout) in enumerate(clips, 1):
                 log.info(
                     "\n--- PROCESSING CLIP %d/%d: %.1fs → %.1fs [%s] ---",

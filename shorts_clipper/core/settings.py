@@ -90,6 +90,9 @@ class Settings:
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
     bgm_volume: float = 0.30
+    phonk_min_tracks: int = 2
+    phonk_fetch_max_tracks: int = 6
+    phonk_fetch_pages: int = 3
     hook_judge_enabled: bool = False
     hook_min_score: float = 0.5
     compliance_enabled: bool = True
@@ -400,6 +403,15 @@ class Settings:
             ),
             bgm_volume=float(
                 _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"
+            ),
+            phonk_min_tracks=int(
+                _env("SHORTS_PHONK_MIN_TRACKS", file_values, "2") or "2"
+            ),
+            phonk_fetch_max_tracks=int(
+                _env("SHORTS_PHONK_FETCH_MAX_TRACKS", file_values, "6") or "6"
+            ),
+            phonk_fetch_pages=int(
+                _env("SHORTS_PHONK_FETCH_PAGES", file_values, "3") or "3"
             ),
             hook_judge_enabled=hook_judge_enabled,
             hook_min_score=hook_min_score,
