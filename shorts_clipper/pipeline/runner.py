@@ -445,19 +445,25 @@ def run(
                     if peak_abs is not None:
                         center_seconds = peak_abs - buffered_start
                         log.info(
-                            "⛳ Anchor clip cap on peak excitement @ %.2fs (window 0.00s→%.2fs)",
+                            "⛳ Anchor clip cap on peak excitement @ %.2fs (peak_ratio=0.75)",
                             peak_abs,
-                            peak_abs,
+                        )
+                        final_window = cap_to_target(
+                            final_window,
+                            center_seconds,
+                            settings.gameplay_clip_seconds,
+                            peak_ratio=0.75,
                         )
                     else:
                         center_seconds = (
-                            (window.start - buffered_start) + (window.end - buffered_start)
+                            (window.start - buffered_start)
+                            + (window.end - buffered_start)
                         ) / 2.0
-                    final_window = cap_to_target(
-                        final_window,
-                        center_seconds,
-                        settings.gameplay_clip_seconds,
-                    )
+                        final_window = cap_to_target(
+                            final_window,
+                            center_seconds,
+                            settings.gameplay_clip_seconds,
+                        )
 
                 # Shift timestamps in precision_segments to account for trimming
                 trim_start = final_window.start

@@ -242,6 +242,72 @@ class CapToTargetTests(unittest.TestCase):
         capped = cap_to_target(final, center_seconds=12.5, target_seconds=15.0)
         self.assertIs(capped, final)
 
+    def test_peak_ratio_075_shifts_peak_to_three_quarters(self):
+        # peak_ratio=0.75: peak at 75% → more buildup, short aftermath.
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=40.0, target_seconds=15.0, peak_ratio=0.75,
+        )
+        # peak at 75% of 15s = 11.25s from start → start = 40.0-11.25=28.75
+        self.assertAlmostEqual(capped.start, 28.75)
+        self.assertAlmostEqual(capped.end, 43.75)
+        self.assertAlmostEqual(capped.duration, 15.0)
+
+    def test_peak_ratio_000_starts_at_peak(self):
+        # peak_ratio=0: peak at start → full clip AFTER peak.
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=30.0, target_seconds=15.0, peak_ratio=0.0,
+        )
+        self.assertAlmostEqual(capped.start, 30.0)
+        self.assertAlmostEqual(capped.end, 45.0)
+
+    def test_peak_ratio_100_ends_at_peak(self):
+        # peak_ratio=1: peak at end → full clip BEFORE peak.
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=30.0, target_seconds=15.0, peak_ratio=1.0,
+        )
+        self.assertAlmostEqual(capped.start, 15.0)
+        self.assertAlmostEqual(capped.end, 30.0)
+
+    def test_peak_ratio_clamps_to_window_edge(self):
+        # peak_ratio=0.75 but window too small on the left → clamp.
+        final = ClipWindow(start=25.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=40.0, target_seconds=15.0, peak_ratio=0.75,
+        )
+        # ideal start = 28.75 (ok), end = 43.75 (ok) → no clamp needed
+        self.assertAlmostEqual(capped.start, 28.75)
+        self.assertAlmostEqual(capped.end, 43.75)
+
+    def test_peak_ratio_clamps_left_edge(self):
+        # peak at 40, ratio=0.75 → ideal start=28.75 but window starts at 30 → clamp.
+        final = ClipWindow(start=30.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=40.0, target_seconds=15.0, peak_ratio=0.75,
+        )
+        self.assertAlmostEqual(capped.start, 30.0)
+        self.assertAlmostEqual(capped.end, 45.0)
+
+    def test_peak_ratio_negative_ignored(self):
+        # Negative ratio treated as 0 → same as peak at start.
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=30.0, target_seconds=15.0, peak_ratio=-0.5,
+        )
+        self.assertAlmostEqual(capped.start, 30.0)
+        self.assertAlmostEqual(capped.end, 45.0)
+
+    def test_peak_ratio_above_one_capped(self):
+        # Ratio > 1 treated as 1 → same as peak at end.
+        final = ClipWindow(start=0.0, end=60.0)
+        capped = cap_to_target(
+            final, center_seconds=30.0, target_seconds=15.0, peak_ratio=2.0,
+        )
+        self.assertAlmostEqual(capped.start, 15.0)
+        self.assertAlmostEqual(capped.end, 30.0)
+
 
 if __name__ == "__main__":
     unittest.main()

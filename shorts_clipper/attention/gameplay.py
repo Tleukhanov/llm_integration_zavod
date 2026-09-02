@@ -146,30 +146,39 @@ def cap_to_target(
     final_window: ClipWindow,
     center_seconds: float,
     target_seconds: float,
+    peak_ratio: float = 0.5,
 ) -> ClipWindow:
-    """Cap a window to at most ``target_seconds``, centered on ``center_seconds``.
+    """Cap a window to at most ``target_seconds`` around ``center_seconds``.
 
     The sentence-boundary finisher can balloon a gameplay clip far past the
     selected energy/emotion window (e.g. a 49s selection -> 98s). This keeps
-    Shorts-friendy, attention-grabbing clips: take a ``target_seconds``-wide
-    slice centered on the original selection, then clamp inside ``final_window``.
+    Shorts-friendly, attention-grabbing clips: take a ``target_seconds``-wide
+    slice around the peak moment, then clamp inside ``final_window``.
+
+    ``peak_ratio`` (0..1) controls where the peak falls inside the clip:
+      - 0.5 (default): peak centered — symmetric slice.
+      - 0.75: peak at 3/4 of the way through — most of the clip is
+        the buildup BEFORE the hype moment, then a short payoff.
+        Ideal for clutch/emotion clips where the tension matters.
 
     Args:
         final_window: Window the finisher produced (potentially oversized).
-        center_seconds: Center to focus the slice on (e.g. the original
-            selection center, in the same local coordinates as final_window).
-        target_seconds: Maximum finished length. <= 0 disables the cap.
+        center_seconds: Peak / center to anchor the slice on (same local
+            coordinates as ``final_window``).
+        target_seconds: Maximum finished length.  <= 0 disables the cap.
+        peak_ratio: Where inside the clip the peak should land (0..1).
 
     Returns:
         A copy of ``final_window`` when it already fits within target_seconds,
-        otherwise a window of at most target_seconds centered on center_seconds.
+        otherwise a window of at most ``target_seconds`` anchored around
+        ``center_seconds`` with the given ``peak_ratio``.
     """
     duration = final_window.end - final_window.start
     if target_seconds <= 0 or duration <= target_seconds:
         return final_window
 
-    half = target_seconds / 2.0
-    lo = max(final_window.start, center_seconds - half)
+    ratio = max(0.0, min(1.0, peak_ratio))
+    lo = max(final_window.start, center_seconds - target_seconds * ratio)
     hi = lo + target_seconds
     if hi > final_window.end:
         hi = final_window.end
