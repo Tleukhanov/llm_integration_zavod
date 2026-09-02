@@ -472,7 +472,7 @@ def burn_subtitles(
                     f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
                 )
             else:
-                parts.append(f"[{current}][vout]")
+                parts.append(f"[{current}]null[vout]")
 
             bgm_vol = float(bgm_volume)
             bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
@@ -530,7 +530,7 @@ def burn_subtitles(
                     f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
                 )
             else:
-                parts.append(f"[{current}][vout]")
+                parts.append(f"[{current}]null[vout]")
 
             filter_complex = ";".join(parts)
 
