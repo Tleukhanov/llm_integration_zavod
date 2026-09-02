@@ -40,6 +40,32 @@ _MP3_RE = re.compile(
 )
 _AUDIO_EXTS = {".mp3", ".m4a", ".ogg", ".wav"}
 
+# Audible file magic signatures used to reject HTML/error pages that some
+# sources return instead of real audio (e.g. cloudflare/403 bodies saved with
+# an .mp3 name). Keyed by the extension we expect.
+_AUDIO_MAGIC: dict[str, tuple[bytes, ...]] = {
+    ".mp3": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    ".wav": (b"RIFF",),
+    ".ogg": (b"OggS",),
+    ".m4a": (b"\x00\x00\x00", b"ftyp"),
+}
+
+
+def _is_audible_bytes(data: bytes, suffix: str) -> bool:
+    """Return True if *data* looks like real audio for *suffix* (or is empty).
+
+    Sources occasionally answer HTTP 200 with an HTML/error page body instead
+    of the requested audio (Cloudflare challenges, reference-blocked CDNs). We
+    refuse to keep those under an audio name so we never feed garbage to the
+    FFmpeg mix.
+    """
+    if not data:
+        return False
+    magic = _AUDIO_MAGIC.get(suffix.lower())
+    if magic is None:
+        return len(data) > 0
+    return any(data.startswith(sig) for sig in magic)
+
 # free-stock-music.com base. Tracks carry CC BY licences; we wrap each MP3 with
 # its human-readable artist/title so callers can emit an attribution line.
 _FREESTOK_BASE = "https://www.free-stock-music.com"
@@ -181,8 +207,11 @@ def _download(url: str, dest: Path) -> bool:
         req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
         with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
             fh.write(resp.read())
-        if dest.stat().st_size == 0:
+        if dest.stat().st_size == 0 or not _is_audible_bytes(
+            dest.read_bytes(), dest.suffix
+        ):
             dest.unlink(missing_ok=True)
+            log.warning("Rejected non-audio payload from %s", url)
             return False
         log.info("Downloaded track -> %s", dest)
         return True

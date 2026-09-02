@@ -4,10 +4,29 @@ from unittest import mock
 
 from shorts_clipper.downloader.music_scraper import (
     Track,
+    _is_audible_bytes,
     ensure_phonk_tracks,
     fetch_phonk_tracks,
     scrape_freestock_tracks,
 )
+
+
+class AudibleBytesTests(unittest.TestCase):
+    def test_mp3_with_id3(self):
+        self.assertTrue(_is_audible_bytes(b"ID3\x03\x00", ".mp3"))
+
+    def test_mp3_with_frame_sync(self):
+        self.assertTrue(_is_audible_bytes(b"\xff\xfb\x90\x64", ".mp3"))
+
+    def test_html_rejected(self):
+        self.assertFalse(_is_audible_bytes(b"<!DOCTYPE html>...", ".mp3"))
+        self.assertFalse(_is_audible_bytes(b""[:0], ".mp3"))
+
+    def test_wav_riff(self):
+        self.assertTrue(_is_audible_bytes(b"RIFF\x00\x00\x00\x00", ".wav"))
+
+    def test_unknown_ext_accepts_any_nonempty(self):
+        self.assertTrue(_is_audible_bytes(b"whatever", ".xyz"))
 
 
 class TrackReprTests(unittest.TestCase):
