@@ -85,7 +85,7 @@ class Settings:
     gameplay_min_length: float = 12.0
     gameplay_max_length: float = 60.0
     gameplay_clutch_mode: str = "energy"
-    gameplay_clip_seconds: float = 15.0
+    gameplay_clip_seconds: float = 30.0
     gameplay_music_forward: bool = True
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
@@ -311,12 +311,12 @@ class Settings:
 
         try:
             gameplay_clip_seconds = float(
-                _env("SHORTS_GAMEPLAY_CLIP_SECONDS", file_values, "15.0") or "15.0"
+                _env("SHORTS_GAMEPLAY_CLIP_SECONDS", file_values, "30.0") or "30.0"
             )
         except ValueError:
-            gameplay_clip_seconds = 15.0
+            gameplay_clip_seconds = 30.0
         if not 5.0 <= gameplay_clip_seconds <= 120.0:
-            gameplay_clip_seconds = 15.0
+            gameplay_clip_seconds = 30.0
 
         gameplay_music_forward = (
             _env("SHORTS_GAMEPLAY_MUSIC_FORWARD", file_values, "true") or "true"

@@ -153,7 +153,7 @@ class GameplaySettingsParseTests(unittest.TestCase):
         self.assertEqual(s.gameplay_top_windows, 5)
         self.assertEqual(s.gameplay_min_length, 12.0)
         self.assertEqual(s.gameplay_max_length, 60.0)
-        self.assertEqual(s.gameplay_clip_seconds, 15.0)
+        self.assertEqual(s.gameplay_clip_seconds, 30.0)
 
     def test_env_parse(self):
         import os
@@ -192,13 +192,13 @@ class GameplaySettingsParseTests(unittest.TestCase):
 
         os.environ["SHORTS_GAMEPLAY_CLIP_SECONDS"] = "500"
         try:
-            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 15.0)
+            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 30.0)
         finally:
             os.environ.pop("SHORTS_GAMEPLAY_CLIP_SECONDS", None)
 
         os.environ["SHORTS_GAMEPLAY_CLIP_SECONDS"] = "1"
         try:
-            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 15.0)
+            self.assertEqual(Settings.from_env("_nonexistent.env").gameplay_clip_seconds, 30.0)
         finally:
             os.environ.pop("SHORTS_GAMEPLAY_CLIP_SECONDS", None)
 
