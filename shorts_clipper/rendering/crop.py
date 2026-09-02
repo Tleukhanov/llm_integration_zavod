@@ -140,7 +140,7 @@ def process_to_vertical(
         ]
     )
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         log.error("FFmpeg crop stderr:\n%s", result.stderr[-3000:])
         raise RuntimeError(f"FFmpeg crop failed (exit {result.returncode})")
@@ -268,7 +268,7 @@ def process_to_wide(
         ]
     )
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         log.error("FFmpeg wide crop stderr:\n%s", result.stderr[-3000:])
         raise RuntimeError(f"FFmpeg wide crop failed (exit {result.returncode})")

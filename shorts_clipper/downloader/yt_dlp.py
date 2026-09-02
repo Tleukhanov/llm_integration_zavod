@@ -391,9 +391,9 @@ def download_clip(
 
     cmd.extend(["--", url])
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        subprocess.run(cmd, check=True, capture_output=True, timeout=900)
     except subprocess.TimeoutExpired:
-        log.error("Video clip download timed out after 10 minutes: %s", url)
+        log.error("Video clip download timed out after 15 minutes: %s", url)
         raise
     except subprocess.CalledProcessError as err:
         err_str = err.stderr.decode(errors="ignore") if err.stderr else ""
