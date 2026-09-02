@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -405,3 +406,89 @@ def download_clip(
         raise
     log.info("✅ Download complete: %s", output_path)
     return output_path
+
+
+_CC_LICENSE_FILTER = (
+    "license='Creative Commons Attribution license (reuse allowed)'"
+)
+
+
+def search_cc_videos(
+    query: str,
+    max_results: int = 20,
+    *,
+    channel_url: str | None = None,
+    dateafter: str | None = None,
+    timeout: int = 120,
+) -> list[dict]:
+    """Search YouTube for Creative-Commons-licensed gaming VODs.
+
+    Finds videos whose uploader opted into the Creative Commons license, so the
+    footage can be reused (with attribution) in a short-form content pipeline.
+    The ``license`` field is set by the uploader, so treat results as
+    candidates to verify, not guarantees.
+
+    Args:
+        query: Free-text search, e.g. ``"CS2 gameplay"``.
+        max_results: Number of results to fetch.
+        channel_url: If given, restrict to a channel's uploads
+            (e.g. ``https://www.youtube.com/@Channel/videos``).
+        dateafter: Only results newer than this (``YYYYMMDD``); skips when None.
+        timeout: Subprocess timeout in seconds.
+
+    Returns:
+        List of flat metadata dicts (``id``, ``title``, ``url``, ``upload_date``)
+        for CC-licensed matches.  Empty on failure timeouts / 429.
+    """
+    cmd = get_base_yt_dlp_cmd()
+    cmd.extend(
+        [
+            "--match-filters",
+            _CC_LICENSE_FILTER,
+            "--flat-playlist",
+            "--print-json",
+            "--playlist-items",
+            f"1:{max_results}",
+        ]
+    )
+    if dateafter:
+        cmd.extend(["--dateafter", dateafter])
+
+    if channel_url:
+        cmd.extend(["--", channel_url])
+    else:
+        cmd.extend(["--", f"ytsearch{max_results}:{query}"])
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        log.warning("CC video search timed out after %ds: %s", timeout, query)
+        return []
+    if proc.returncode != 0:
+        err_str = proc.stderr[-2000:]
+        log.warning("CC video search failed for %r: %s", query, err_str)
+        return []
+
+    results: list[dict] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        _id = item.get("id")
+        if not _id:
+            continue
+        results.append(
+            {
+                "id": _id,
+                "title": item.get("title"),
+                "url": f"https://www.youtube.com/watch?v={_id}",
+                "upload_date": item.get("upload_date"),
+                "channel": item.get("channel") or item.get("uploader"),
+            }
+        )
+    log.info("CC video search %r returned %d result(s)", query, len(results))
+    return results
