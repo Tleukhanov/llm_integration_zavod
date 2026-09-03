@@ -87,12 +87,15 @@ class Settings:
     gameplay_clutch_mode: str = "energy"
     gameplay_clip_seconds: float = 30.0
     gameplay_music_forward: bool = True
+    clip_min_separation: float = 15.0
     bgm_mode: str = "off"
     music_dir: Path = Path("D:/shorts_music")
     bgm_volume: float = 0.30
     phonk_min_tracks: int = 2
     phonk_fetch_max_tracks: int = 6
     phonk_fetch_pages: int = 3
+    hook_banner_enabled: bool = True
+    hook_banner_text: str = "WAIT FOR IT…"
     hook_judge_enabled: bool = False
     hook_min_score: float = 0.5
     compliance_enabled: bool = True
@@ -218,6 +221,12 @@ class Settings:
             _env("SHORTS_STREAM_AUDIO_ENERGY", file_values, "true") or "true"
         ).lower() in {"1", "true", "yes", "on"}
 
+        hook_banner_enabled = (
+            _env("SHORTS_HOOK_BANNER_ENABLED", file_values, "true") or "true"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        hook_banner_text = _env("SHORTS_HOOK_BANNER_TEXT", file_values, "WAIT FOR IT…") or "WAIT FOR IT…"
+
         hook_judge_enabled = (
             _env("SHORTS_HOOK_JUDGE_ENABLED", file_values, "false") or "false"
         ).lower() in {"1", "true", "yes", "on"}
@@ -325,6 +334,13 @@ class Settings:
             _env("SHORTS_GAMEPLAY_MUSIC_FORWARD", file_values, "true") or "true"
         ).lower() in {"1", "true", "yes", "on"}
 
+        try:
+            clip_min_separation = float(
+                _env("SHORTS_CLIP_MIN_SEPARATION", file_values, "15.0") or "15.0"
+            )
+        except ValueError:
+            clip_min_separation = 15.0
+
         if proxy:
             os.environ["SHORTS_PROXY"] = proxy
 
@@ -397,6 +413,7 @@ class Settings:
             gameplay_clutch_mode=gameplay_clutch_mode,
             gameplay_clip_seconds=gameplay_clip_seconds,
             gameplay_music_forward=gameplay_music_forward,
+            clip_min_separation=clip_min_separation,
             bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
             music_dir=Path(
                 _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"
@@ -413,6 +430,8 @@ class Settings:
             phonk_fetch_pages=int(
                 _env("SHORTS_PHONK_FETCH_PAGES", file_values, "3") or "3"
             ),
+            hook_banner_enabled=hook_banner_enabled,
+            hook_banner_text=hook_banner_text,
             hook_judge_enabled=hook_judge_enabled,
             hook_min_score=hook_min_score,
             compliance_enabled=compliance_enabled,

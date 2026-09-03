@@ -143,5 +143,113 @@ class BurnSubtitleBgmTests(unittest.TestCase):
         self.assertIn("ass=", joined)
 
 
+class HookBannerTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="hook_test_")
+        self.tmp = Path(self._tmp.name)
+        self.video = self.tmp / "input.avi"
+        _build_tiny_mp4(self.video)
+        self.segments = _make_sample(
+            [
+                {
+                    "start": 0.0,
+                    "end": 1.8,
+                    "text": "hello world",
+                    "words": [
+                        (0.0, 0.5, "hello"),
+                        (0.6, 1.8, "world"),
+                    ],
+                }
+            ]
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _capture_cmd(self, **burn_kwargs):
+        out = self.tmp / "out.mp4"
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+
+            class R:
+                returncode = 0
+                stderr = ""
+                stdout = ""
+
+            return R()
+
+        with mock.patch("shorts_clipper.captions.generator.subprocess.run", fake_run):
+            burn_subtitles(
+                self.video,
+                self.segments,
+                start_offset=0.0,
+                output_path=out,
+                **burn_kwargs,
+            )
+        return captured["cmd"]
+
+    def test_hook_enabled_includes_drawtext(self):
+        cmd = self._capture_cmd(hook_banner_text="WAIT FOR IT...")
+        joined = " ".join(cmd)
+        self.assertIn("drawtext=", joined)
+        self.assertIn("WAIT FOR IT...", joined)
+
+    def test_hook_disabled_no_drawtext(self):
+        cmd = self._capture_cmd(hook_banner_text=None)
+        joined = " ".join(cmd)
+        self.assertNotIn("WAIT FOR IT...", joined)
+
+    def test_hook_empty_string_no_drawtext(self):
+        cmd = self._capture_cmd(hook_banner_text="")
+        joined = " ".join(cmd)
+        self.assertNotIn("drawtext=", joined)
+
+    def test_hook_with_bgm_includes_drawtext(self):
+        music = self.tmp / "phonk.mp3"
+        music.write_bytes(b"ID3\x03\x00\x00\x00fake-music-bytes")
+        cmd = self._capture_cmd(
+            hook_banner_text="CLICK THIS",
+            bgm_audio=music,
+            bgm_volume=0.30,
+        )
+        joined = " ".join(cmd)
+        self.assertIn("drawtext=", joined)
+        self.assertIn("CLICK THIS", joined)
+        self.assertIn("-filter_complex", joined)
+
+    def test_hook_fade_out_alpha_expression(self):
+        cmd = self._capture_cmd(hook_banner_text="HOOK")
+        joined = " ".join(cmd)
+        # Verify the fade-out alpha expression is present
+        self.assertIn("alpha=", joined)
+        self.assertIn("between(t,0,1.0)", joined)
+
+
+class HookSettingsTests(unittest.TestCase):
+    def test_defaults(self):
+        from shorts_clipper.core.settings import Settings
+
+        s = Settings()
+        self.assertTrue(s.hook_banner_enabled)
+        self.assertEqual(s.hook_banner_text, "WAIT FOR IT\u2026")
+
+    def test_env_parse(self):
+        import os
+
+        from shorts_clipper.core.settings import Settings
+
+        os.environ["SHORTS_HOOK_BANNER_ENABLED"] = "false"
+        os.environ["SHORTS_HOOK_BANNER_TEXT"] = "WATCH NOW"
+        try:
+            s = Settings.from_env("_nonexistent.env")
+            self.assertFalse(s.hook_banner_enabled)
+            self.assertEqual(s.hook_banner_text, "WATCH NOW")
+        finally:
+            os.environ.pop("SHORTS_HOOK_BANNER_ENABLED", None)
+            os.environ.pop("SHORTS_HOOK_BANNER_TEXT", None)
+
+
 if __name__ == "__main__":
     unittest.main()

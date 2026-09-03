@@ -178,34 +178,97 @@ def run(
                         window_pairs = windows_and_peaks_from_audio(
                             audio_path, settings.gameplay_scan_max_seconds, settings
                         )
-                    energy_windows = [w for w, _ in window_pairs]
-                    peaks_by_start = {round(w.start, 2): p for w, p in window_pairs}
-                    if not energy_windows:
+                    if not window_pairs:
                         raise MediaProcessingError(
                             "No energetic windows found in gameplay mode. "
                             "The audio may be silent or below the energy threshold."
                         )
+                    # window_pairs are (ClipWindow, peak_second, peak_magnitude).
+                    window_info = [
+                        (w, p, m) for w, p, m in window_pairs
+                    ]
+                    energy_windows = [w for w, _, _ in window_info]
+                    peaks_by_start = {
+                        round(w.start, 2): p for w, p, _ in window_info
+                    }
+                    magnitude_by_start = {
+                        round(w.start, 2): m for w, _, m in window_info
+                    }
 
-                    # windows_and_peaks_from_audio returns best-score-first; reorder by start for
-                    # deterministic downstream processing and preselect by count.
-                    energy_windows.sort(key=lambda w: w.start)
+                    # De-duplicate near-adjacent windows so the final set has
+                    # minimum temporal separation (avoids near-duplicate clips).
+                    from shorts_clipper.attention.gameplay import select_non_overlapping
+
+                    deduped = select_non_overlapping(
+                        energy_windows,
+                        min_gap=settings.clip_min_separation,
+                    )
+                    log.info(
+                        "De-duplication: %d windows kept after min-separation=%.1fs",
+                        len(deduped),
+                        settings.clip_min_separation,
+                    )
+                    if not deduped:
+                        raise MediaProcessingError(
+                            "No energetic windows after de-duplication in gameplay mode."
+                        )
+
+                    # Rank by hype strength: peak magnitude descending, then
+                    # window start ascending as a tiebreaker. Take the first
+                    # `count` (minus already-preselected clips).
+                    ranked = sorted(
+                        deduped,
+                        key=lambda w: (
+                            -float(magnitude_by_start.get(round(w.start, 2), 0.0)),
+                            w.start,
+                        ),
+                    )
+                    selected = ranked[: count - len(clips)]
                     gameplay_clips = [
                         (ClipWindow(start=w.start, end=w.end), "center")
-                        for w in energy_windows
+                        for w in selected
                     ]
-                    clips.extend(gameplay_clips[: count - len(clips)])
+                    clips.extend(gameplay_clips)
 
+                    log.info(
+                        "Selected %d windows by peak strength (peak_magnitude desc, start asc): %s",
+                        len(selected),
+                        [
+                            {
+                                "rank": idx + 1,
+                                "start": round(w.start, 2),
+                                "end": round(w.end, 2),
+                                "peak": peaks_by_start.get(round(w.start, 2)),
+                                "peak_magnitude": magnitude_by_start.get(
+                                    round(w.start, 2)
+                                ),
+                            }
+                            for idx, w in enumerate(selected)
+                        ],
+                    )
+
+                    ranked_all = sorted(
+                        deduped,
+                        key=lambda w: (
+                            -float(magnitude_by_start.get(round(w.start, 2), 0.0)),
+                            w.start,
+                        ),
+                    )
                     run_ctx.add_decision_trace(
                         {
                             "mode": "gameplay",
                             "clutch_mode": clutch_mode,
                             "energy_windows": [
                                 {
+                                    "rank": idx + 1,
                                     "start": w.start,
                                     "end": w.end,
                                     "peak": peaks_by_start.get(round(w.start, 2)),
+                                    "peak_magnitude": magnitude_by_start.get(
+                                        round(w.start, 2)
+                                    ),
                                 }
-                                for w in energy_windows
+                                for idx, w in enumerate(ranked_all)
                             ],
                         }
                     )
@@ -677,6 +740,7 @@ def run(
                     video_codec=settings.video_codec,
                     preset=settings.video_preset,
                     style_name=settings.subtitle_style,
+                    hook_banner_text=settings.hook_banner_text if settings.hook_banner_enabled else None,
                     **banner_kwargs,
                     **bgm_kwargs,
                     **ad_card_kwargs,
@@ -697,6 +761,7 @@ def run(
                         video_codec=settings.video_codec,
                         preset=settings.video_preset,
                         style_name=settings.subtitle_style,
+                        hook_banner_text=settings.hook_banner_text if settings.hook_banner_enabled else None,
                         **banner_kwargs,
                         **bgm_kwargs,
                         **ad_card_kwargs,

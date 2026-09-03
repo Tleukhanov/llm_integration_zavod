@@ -330,6 +330,7 @@ def burn_subtitles(
     ad_card_text: str | None = None,
     ad_card_start: float = 0.0,
     ad_card_duration: float | None = None,
+    hook_banner_text: str | None = None,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -359,6 +360,9 @@ def burn_subtitles(
         ad_card_text:   Optional CTA text banner shown with the ad card.
         ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
         ad_card_duration: How long the card is visible (None => until end of clip).
+        hook_banner_text:  Optional hook caption burned into the first ~1 s of
+                          the clip (upper-third, bold yellow, black border,
+                          fades out).  ``None`` or empty disables it.
 
     Returns:
         Path to the output video.
@@ -437,6 +441,19 @@ def burn_subtitles(
         # Mid-roll ad card window; None => until end of clip (per-frame check)
         ad_end = ad_card_start + ad_card_duration if ad_card_duration is not None else 999999.0
 
+        # Hook banner drawtext filter (first ~1 s, upper-third, bold yellow, fades out)
+        hook_filter = ""
+        if hook_banner_text:
+            _hook_escaped = hook_banner_text.replace("'", "'\\''").replace(":", "\\:")
+            hook_filter = (
+                f"drawtext={font_arg}text='{_hook_escaped}':"
+                "fontsize=H/14:fontcolor=yellow:"
+                "borderw=5:bordercolor=black:"
+                f"x=(w-text_w)/2:y=h/6:"
+                "enable='between(t,0,1.0)':"
+                "alpha='if(between(t,0.85,1.0),(1.0-t)/0.15,1)'"
+            )
+
         # Any video overlay (banner, ad card image, or drawtext CTA)?
         video_overlay = use_banner or use_ad_image or bool(ad_text)
 
@@ -445,6 +462,10 @@ def burn_subtitles(
             # overlays) and the audio mix (you cannot combine -vf and -filter_complex).
             parts = [f"[0:v]{vf}[v0]"]
             current = "v0"
+
+            if hook_filter:
+                parts.append(f"[{current}]{hook_filter}[vh]")
+                current = "vh"
 
             if use_banner:
                 parts.append("[1:v]scale=200:-1[logo]")
@@ -504,6 +525,10 @@ def burn_subtitles(
             parts = [f"[0:v]{vf}[v0]"]
             current = "v0"
 
+            if hook_filter:
+                parts.append(f"[{current}]{hook_filter}[vh]")
+                current = "vh"
+
             if use_banner:
                 parts.append("[1:v]scale=200:-1[logo]")
                 overlay_x = "W-w-40" if "right" in banner_position else "40"
@@ -536,7 +561,10 @@ def burn_subtitles(
 
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
         else:
-            cmd.extend(["-vf", vf])
+            simple_vf = vf
+            if hook_filter:
+                simple_vf += f",{hook_filter}"
+            cmd.extend(["-vf", simple_vf])
 
         cmd.extend(["-c:v", video_codec])
 
