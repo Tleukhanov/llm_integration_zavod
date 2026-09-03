@@ -53,7 +53,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0)]
+        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0, 0.9)]
         mock_transcribe.return_value = []  # must NOT be used in gameplay mode
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])
@@ -104,7 +104,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [(ClipWindow(start=5.0, end=35.0), 18.0)]
+        mock_windows.return_value = [(ClipWindow(start=5.0, end=35.0), 18.0, 0.8)]
         mock_transcribe.return_value = []
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])
@@ -148,7 +148,7 @@ class SubtitleGracefulTests(unittest.TestCase):
             return Path(path)
 
         mock_download_audio.side_effect = _make_audio
-        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0)]
+        mock_windows.return_value = [(ClipWindow(start=10.0, end=40.0), 20.0, 0.9)]
         mock_transcribe.return_value = []  # must NOT be used in gameplay mode
         mock_download_clip.side_effect = lambda *a, **k: (
             Path(a[1]).write_bytes(b"fake") or Path(a[1])

@@ -327,6 +327,35 @@ def cluster_peaks(
     return peaks
 
 
+def _cluster_peaks_with_magnitudes(
+    signal: list[float],
+    windows: list[ClipWindow],
+    window_seconds: float = 1.0,
+) -> list[tuple[float, float]]:
+    """Peak position (seconds) and magnitude inside each window.
+
+    Like :func:`cluster_peaks` but also returns the signal value at the peak
+    position, enabling ranking windows by hype strength.
+
+    Returns:
+        One (peak_second, peak_magnitude) tuple per window, same order as
+        ``windows``.  Falls back to the window center and 0.0 magnitude when
+        the signal is empty or the window maps outside the signal.
+    """
+    peaks: list[tuple[float, float]] = []
+    n = len(signal)
+    for w in windows:
+        lo = min(max(int(w.start / window_seconds), 0), n - 1)
+        hi = min(max(int(math.ceil(w.end / window_seconds)) - 1, 0), n - 1)
+        if n == 0 or hi < lo:
+            peaks.append(((w.start + w.end) / 2.0, 0.0))
+        else:
+            segment = signal[lo : hi + 1]
+            offset = int(np.argmax(segment))
+            peaks.append(((lo + offset + 0.5) * window_seconds, float(segment[offset])))
+    return peaks
+
+
 # ---------------------------------------------------------------------------
 # Public: top-level audio → windows (+ peak anchors) helpers
 # ---------------------------------------------------------------------------
@@ -336,9 +365,9 @@ def windows_and_peaks_from_audio(
     audio_path,
     total_seconds: float,
     settings,
-) -> list[tuple[ClipWindow, float]]:
-    """Extract excitement from audio; return the top clutch windows AND the
-    absolute peak-excitement second within each window.
+) -> list[tuple[ClipWindow, float, float]]:
+    """Extract excitement from audio; return the top clutch windows, the
+    absolute peak-excitement second within each window, and the peak magnitude.
 
     Scoring: 0.6 × normalised_emotion + 0.4 × normalised_energy (blended for
     explainability and determinism).  Windows are then selected by this blended
@@ -350,8 +379,8 @@ def windows_and_peaks_from_audio(
         settings: A Settings instance with the gameplay_* fields.
 
     Returns:
-        Pairs of (ClipWindow, peak_absolute_seconds), sorted by blended score
-        descending.  Empty on failure.
+        Triples of (ClipWindow, peak_absolute_seconds, peak_magnitude), sorted
+        by blended score descending.  Empty on failure.
     """
     try:
         from shorts_clipper.attention.audio_energy import extract_audio_energy
@@ -390,7 +419,8 @@ def windows_and_peaks_from_audio(
             max_length=settings.gameplay_max_length,
             top_n=settings.gameplay_top_windows,
         )
-        return list(zip(windows, cluster_peaks(blended, windows)))
+        peak_data = _cluster_peaks_with_magnitudes(blended, windows)
+        return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data)]
     except Exception as exc:
         log.warning("Emotion window selection failed for %s: %s", audio_path, exc)
         return []
@@ -402,4 +432,4 @@ def windows_from_audio_emotion(
     settings,
 ) -> list[ClipWindow]:
     """Top clutch/emotion ClipWindows (windows only; see windows_and_peaks_from_audio)."""
-    return [w for w, _ in windows_and_peaks_from_audio(audio_path, total_seconds, settings)]
+    return [w for w, _, _ in windows_and_peaks_from_audio(audio_path, total_seconds, settings)]

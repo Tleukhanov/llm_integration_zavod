@@ -140,14 +140,15 @@ class WindowsFromAudioEmotionTests(unittest.TestCase):
         )
         pairs = windows_and_peaks_from_audio(Path("fake.m4a"), 60.0, s)
         self.assertEqual(len(pairs), 1)
-        window, peak = pairs[0]
+        window, peak, magnitude = pairs[0]
         self.assertEqual(window.start, 10.0)
         self.assertEqual(window.end, 25.0)
         self.assertEqual(peak, 15.5)
+        self.assertGreater(magnitude, 0.0)
         # The plain wrapper returns exactly the windows of the pairs.
         self.assertEqual(
             windows_from_audio_emotion(Path("fake.m4a"), 60.0, s),
-            [w for w, _ in pairs],
+            [w for w, _, _ in pairs],
         )
 
 
@@ -302,7 +303,7 @@ class RunnerRoutingTests(unittest.TestCase):
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
-            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
+            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.95)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -323,7 +324,7 @@ class RunnerRoutingTests(unittest.TestCase):
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
-            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
+            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.85)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -345,7 +346,7 @@ class RunnerRoutingTests(unittest.TestCase):
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
-            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
+            mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.85)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -368,7 +369,7 @@ class RunnerRoutingTests(unittest.TestCase):
         with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
-            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0)]
+            mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.95)]
             from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
             with self.assertRaises(MediaProcessingError):
@@ -378,6 +379,133 @@ class RunnerRoutingTests(unittest.TestCase):
             trace = get_run_context().decision_trace
             self.assertEqual(trace.get("clutch_mode"), "energy")
             self.assertEqual(trace.get("mode"), "gameplay")
+
+    def test_energy_mode_ranks_windows_by_peak_magnitude(self):
+        """Runner should rank windows by peak magnitude desc, then start asc."""
+        from shorts_clipper.core.observability import get_run_context
+
+        mocks = self._mocks()
+        mocks["fetch"].return_value = []
+        self._wire_audio_mock(mocks["download_audio"])
+        self._wire_clip_mocks(mocks["download_clip"], mocks["vertical"])
+        mocks["transcribe"].return_value = []
+
+        w1 = ClipWindow(start=100.0, end=160.0)
+        w2 = ClipWindow(start=20.0, end=50.0)
+        w3 = ClipWindow(start=200.0, end=260.0)
+        w4 = ClipWindow(start=5.0, end=35.0)
+        # magnitude: w2=0.99, w4=0.90, w1=0.80, w3=0.10
+        mock_return = [
+            (w3, 230.0, 0.10),
+            (w1, 130.0, 0.80),
+            (w2, 35.0, 0.99),
+            (w4, 20.0, 0.90),
+        ]
+
+        with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
+             mocks["vertical"], mocks["transcribe"], \
+             mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
+            mock_wfa.return_value = mock_return
+            from shorts_clipper.pipeline import runner as r
+            with self.assertRaises(Exception):
+                r.run("https://www.youtube.com/watch?v=abc123abc12",
+                      settings=self._base_settings(
+                          gameplay_clutch_mode="energy",
+                          clip_min_separation=0.0,
+                      ),
+                      count=2)
+
+            trace = get_run_context().decision_trace
+            entries = trace["energy_windows"]
+            self.assertEqual(len(entries), 4)
+            # First ranked: magnitude 0.99 (w2)
+            self.assertAlmostEqual(entries[0]["peak_magnitude"], 0.99)
+            self.assertEqual(entries[0]["start"], 20.0)
+            self.assertEqual(entries[0]["rank"], 1)
+            # Second ranked: magnitude 0.90 (w4)
+            self.assertAlmostEqual(entries[1]["peak_magnitude"], 0.90)
+            self.assertEqual(entries[1]["start"], 5.0)
+            self.assertEqual(entries[1]["rank"], 2)
+            # Third: magnitude 0.80 (w1)
+            self.assertAlmostEqual(entries[2]["peak_magnitude"], 0.80)
+            self.assertEqual(entries[3]["rank"], 4)
+
+    def test_emotion_mode_ranks_windows_by_peak_magnitude(self):
+        """Emotion mode should also rank windows by peak magnitude desc."""
+        from shorts_clipper.core.observability import get_run_context
+
+        mocks = self._mocks()
+        mocks["fetch"].return_value = []
+        self._wire_audio_mock(mocks["download_audio"])
+        self._wire_clip_mocks(mocks["download_clip"], mocks["vertical"])
+        mocks["transcribe"].return_value = []
+
+        w_a = ClipWindow(start=50.0, end=110.0)
+        w_b = ClipWindow(start=10.0, end=40.0)
+        mock_return = [
+            (w_a, 80.0, 0.60),
+            (w_b, 25.0, 0.95),
+        ]
+
+        with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
+             mocks["vertical"], mocks["transcribe"], \
+             mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
+            mock_emo.return_value = mock_return
+            from shorts_clipper.pipeline import runner as r
+            with self.assertRaises(Exception):
+                r.run("https://www.youtube.com/watch?v=abc123abc12",
+                      settings=self._base_settings(
+                          gameplay_clutch_mode="emotion",
+                          clip_min_separation=0.0,
+                      ),
+                      count=1)
+
+            trace = get_run_context().decision_trace
+            entries = trace["energy_windows"]
+            self.assertEqual(len(entries), 2)
+            # w_b has higher magnitude (0.95) and should rank first
+            self.assertEqual(entries[0]["start"], 10.0)
+            self.assertAlmostEqual(entries[0]["peak_magnitude"], 0.95)
+            self.assertEqual(entries[0]["rank"], 1)
+            self.assertEqual(entries[1]["start"], 50.0)
+            self.assertAlmostEqual(entries[1]["peak_magnitude"], 0.60)
+            self.assertEqual(entries[1]["rank"], 2)
+
+    def test_tiebreaker_uses_start_ascending(self):
+        """When magnitudes are equal, lower start should rank first."""
+        from shorts_clipper.core.observability import get_run_context
+
+        mocks = self._mocks()
+        mocks["fetch"].return_value = []
+        self._wire_audio_mock(mocks["download_audio"])
+        self._wire_clip_mocks(mocks["download_clip"], mocks["vertical"])
+        mocks["transcribe"].return_value = []
+
+        w_high = ClipWindow(start=100.0, end=160.0)
+        w_low = ClipWindow(start=10.0, end=40.0)
+        mock_return = [
+            (w_high, 130.0, 0.85),
+            (w_low, 25.0, 0.85),
+        ]
+
+        with mocks["fetch"], mocks["download_audio"], mocks["download_clip"], \
+             mocks["vertical"], mocks["transcribe"], \
+             mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
+            mock_wfa.return_value = mock_return
+            from shorts_clipper.pipeline import runner as r
+            with self.assertRaises(Exception):
+                r.run("https://www.youtube.com/watch?v=abc123abc12",
+                      settings=self._base_settings(
+                          gameplay_clutch_mode="energy",
+                          clip_min_separation=0.0,
+                      ),
+                      count=2)
+
+            trace = get_run_context().decision_trace
+            entries = trace["energy_windows"]
+            # Equal magnitude → tiebreak by start ascending: w_low (10.0) before w_high (100.0)
+            self.assertEqual(entries[0]["start"], 10.0)
+            self.assertEqual(entries[1]["start"], 100.0)
 
 
 if __name__ == "__main__":
