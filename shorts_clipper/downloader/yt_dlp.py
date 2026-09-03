@@ -297,9 +297,9 @@ def download_audio(
     cmd.extend(["--", url])
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
     except subprocess.TimeoutExpired:
-        log.error("Audio download timed out after 10 minutes: %s", url)
+        log.error("Audio download timed out after 30 minutes: %s", url)
         raise
     except subprocess.CalledProcessError as err:
         err_str = err.stderr.decode(errors="ignore") if err.stderr else ""
