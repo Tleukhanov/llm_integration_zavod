@@ -141,3 +141,37 @@ def pick_track(
     # fall back to the full candidate pool.
     pool = long if len(long) >= 2 else candidates
     return rng.choice(pool)
+
+
+def track_attribution(track: Path) -> str | None:
+    """Return a short human-readable credit line for a BGM track, if any.
+
+    The scraper (``shorts_clipper.downloader.music_scraper``) writes a
+    ``<track>.attribution.txt`` sidecar next to CC-BY tracks so publishers can
+    credit the source.  Returns e.g. ``"Track by Author — source"`` or ``None``
+    when the track has no recorded attribution (e.g. procedurally generated or
+    no-attribute-required music).
+    """
+    track = Path(track)
+    credit_file = track.with_suffix(track.suffix + ".attribution.txt")
+    if not credit_file.is_file():
+        return None
+    try:
+        text = credit_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    credit = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("Credit:"):
+            credit = line[len("Credit:"):].strip()
+            break
+    if not credit:
+        return None
+    source = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.lower().startswith("source:"):
+            source = line[len("Source:"):].strip().split("?")[0]
+            break
+    return credit if not source else f"{credit} ({source})"

@@ -1,7 +1,9 @@
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from shorts_clipper.captions.music import track_attribution
 from shorts_clipper.downloader.music_scraper import (
     Track,
     _is_audible_bytes,
@@ -9,6 +11,38 @@ from shorts_clipper.downloader.music_scraper import (
     fetch_phonk_tracks,
     scrape_freestock_tracks,
 )
+
+
+class TrackAttributionTests(unittest.TestCase):
+    def _attr_file(self, content):
+        tmp = Path(tempfile.gettempdir())
+        track = tmp / "song.mp3"
+        (tmp / "song.mp3.attribution.txt").write_text(content, encoding="utf-8")
+        return track
+
+    def test_reads_credit_and_source(self):
+        track = self._attr_file(
+            "Track: awesome-phonk\n"
+            "Source: https://x.com/?a=1\n"
+            "License: CC BY 4.0\n"
+            "Credit: Royalty Free Music\n"
+        )
+        try:
+            result = track_attribution(track)
+            self.assertIn("Royalty Free Music", result)
+            self.assertIn("x.com", result)
+        finally:
+            (track.parent / "song.mp3.attribution.txt").unlink(missing_ok=True)
+
+    def test_none_when_no_attr_file(self):
+        self.assertIsNone(track_attribution(Path("D:/shorts_music/nonexistent.wav")))
+
+    def test_none_when_no_credit_line(self):
+        track = self._attr_file("Some other line\n")
+        try:
+            self.assertIsNone(track_attribution(track))
+        finally:
+            (track.parent / "song.mp3.attribution.txt").unlink(missing_ok=True)
 
 
 class AudibleBytesTests(unittest.TestCase):

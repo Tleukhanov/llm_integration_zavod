@@ -836,6 +836,26 @@ def run(
                             "Affiliate metadata enrichment failed for clip %d: %s", idx, aff_err
                         )
 
+                # Append music attribution (CC-BY royalty-free tracks) so
+                # publishers can credit the source, if a track with a
+                # sidecar .attribution.txt was used for BGM this clip.
+                if meta.get("description") and track is not None:
+                    try:
+                        from shorts_clipper.captions.music import track_attribution
+
+                        credit = track_attribution(track)
+                        if credit:
+                            meta["description"] = (
+                                f"{meta['description']}\n\nMusic by {credit}."
+                            )
+                            log.info("Appended music attribution for %s", track.name)
+                    except Exception as attr_err:
+                        log.warning(
+                            "Music attribution enrichment failed for clip %d: %s",
+                            idx,
+                            attr_err,
+                        )
+
                 json_path = current_output_path.with_suffix(".json")
                 try:
                     json_path.write_text(
