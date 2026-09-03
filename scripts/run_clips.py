@@ -41,6 +41,15 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Only search results newer than YYYYMMDD (with --source).")
     p.add_argument("--upload", action="store_true",
                    help="Publish after rendering (default: private).")
+    p.add_argument("--gameplay", action="store_true",
+                   help="Enable hype/gameplay mode (peak-energy clip selection + music-forward BGM). Matches SHORTS_GAMEPLAY_MODE.")
+    p.add_argument("--clutch", choices=["energy", "emotion"], default=None,
+                   help="Gameplay clutch window mode (SHORTS_GAMEPLAY_CLUTCH).")
+    p.add_argument("--clips-seconds", type=float, dest="clip_seconds",
+                   default=None,
+                   help="Target clip length in seconds (SHORTS_GAMEPLAY_CLIP_SECONDS, default 30).")
+    p.add_argument("--aspect", choices=["vertical", "wide", "both"],
+                   default=None, help="Output aspect (default from .env).")
     return p
 
 
@@ -51,6 +60,15 @@ def main(argv: list[str] | None = None) -> int:
     from shorts_clipper.pipeline.runner import run
 
     settings = Settings.from_env()
+
+    if args.gameplay:
+        settings.gameplay_mode = True
+    if args.clutch:
+        settings.gameplay_clutch_mode = args.clutch
+    if args.clip_seconds:
+        settings.gameplay_clip_seconds = float(args.clip_seconds)
+    if args.aspect:
+        settings.output_aspect = args.aspect
 
     url = args.url
     if url is None and args.source:
