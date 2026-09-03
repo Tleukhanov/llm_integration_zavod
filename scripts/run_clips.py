@@ -56,19 +56,24 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
+    from dataclasses import replace
+
     from shorts_clipper.core.settings import Settings
     from shorts_clipper.pipeline.runner import run
 
     settings = Settings.from_env()
 
+    overrides: dict = {}
     if args.gameplay:
-        settings.gameplay_mode = True
+        overrides["gameplay_mode"] = True
     if args.clutch:
-        settings.gameplay_clutch_mode = args.clutch
+        overrides["gameplay_clutch_mode"] = args.clutch
     if args.clip_seconds:
-        settings.gameplay_clip_seconds = float(args.clip_seconds)
+        overrides["gameplay_clip_seconds"] = float(args.clip_seconds)
     if args.aspect:
-        settings.output_aspect = args.aspect
+        overrides["output_aspect"] = args.aspect
+    if overrides:
+        settings = replace(settings, **overrides)
 
     url = args.url
     if url is None and args.source:
