@@ -685,6 +685,7 @@ def run(
                     }
 
                 bgm_kwargs = {}
+                track: Path | None = None
                 if settings.bgm_mode != "off":
                     bgm_seed = hash(str(current_output_path))
                     run_seed = random.Random(bgm_seed)
