@@ -50,6 +50,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Target clip length in seconds (SHORTS_GAMEPLAY_CLIP_SECONDS, default 30).")
     p.add_argument("--aspect", choices=["vertical", "wide", "both"],
                    default=None, help="Output aspect (default from .env).")
+    p.add_argument("--bgm", choices=["off", "always", "hybrid"],
+                   default=None,
+                   help="Background music mode (SHORTS_BGM_MODE). Default off; "
+                        "'always' adds phonk BGM to every clip.")
     return p
 
 
@@ -72,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
         overrides["gameplay_clip_seconds"] = float(args.clip_seconds)
     if args.aspect:
         overrides["output_aspect"] = args.aspect
+    if args.bgm:
+        overrides["bgm_mode"] = args.bgm
     if overrides:
         settings = replace(settings, **overrides)
 
