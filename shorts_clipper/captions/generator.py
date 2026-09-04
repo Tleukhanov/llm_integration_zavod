@@ -488,8 +488,9 @@ def burn_subtitles(
                 text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
                 parts.append(
                     f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
-                    f"fontsize=H/20:fontcolor=white:box=1:boxcolor=black@0.6:"
-                    f"boxborderw=24:x=(w-text_w)/2:y=H-h-150:"
+                    f"fontsize=H/14:fontcolor=white:borderw=3:bordercolor=black:"
+                    f"box=1:boxcolor=black@0.75:boxborderw=28:"
+                    f"x=(w-text_w)/2:y=H-h-400:"
                     f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
                 )
             else:
@@ -550,8 +551,9 @@ def burn_subtitles(
                 text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
                 parts.append(
                     f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
-                    f"fontsize=H/20:fontcolor=white:box=1:boxcolor=black@0.6:"
-                    f"boxborderw=24:x=(w-text_w)/2:y=H-h-150:"
+                    f"fontsize=H/14:fontcolor=white:borderw=3:bordercolor=black:"
+                    f"box=1:boxcolor=black@0.75:boxborderw=28:"
+                    f"x=(w-text_w)/2:y=H-h-400:"
                     f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
                 )
             else:
