@@ -21,8 +21,10 @@ This module keeps its dependency footprint minimal (stdlib ``urllib`` only).
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +68,7 @@ def _is_audible_bytes(data: bytes, suffix: str) -> bool:
         return len(data) > 0
     return any(data.startswith(sig) for sig in magic)
 
+
 # free-stock-music.com base. Tracks carry CC BY licences; we wrap each MP3 with
 # its human-readable artist/title so callers can emit an attribution line.
 _FREESTOK_BASE = "https://www.free-stock-music.com"
@@ -80,6 +83,59 @@ class Track:
     name: str
     artist: str | None = None
     license: str | None = None
+
+
+_PIXABAY_API_URL = "https://pixabay.com/api/music/"
+
+
+def search_pixabay_api(
+    query: str = "phonk",
+    api_key: str = "",
+    max_tracks: int = 10,
+) -> list[Track]:
+    """Fetch tracks from the Pixabay Music API using *api_key*.
+
+    Returns up to *max_tracks* ``Track`` objects.  Never raises on network
+    errors – returns an empty list instead so callers can fall back.
+    """
+    if not api_key:
+        return []
+    params = urllib.parse.urlencode({
+        "key": api_key,
+        "q": query,
+        "media_type": "music",
+        "per_page": min(max_tracks, 200),
+    })
+    url = f"{_PIXABAY_API_URL}?{params}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        log.warning("Pixabay API request failed: %s", exc)
+        return []
+
+    hits = data.get("hits", [])
+    tracks: list[Track] = []
+    for hit in hits:
+        audio = hit.get("audio", {})
+        audio_url = audio.get("url", "")
+        if not audio_url:
+            continue
+        tags = hit.get("tags", "")
+        artist = hit.get("user", "")
+        tracks.append(
+            Track(
+                url=audio_url,
+                name=f"{tags.split(',')[0].strip() if tags else query} - {artist}".strip(" -"),
+                artist=artist or None,
+                license="Pixabay Content License (free commercial use)",
+            )
+        )
+        if len(tracks) >= max_tracks:
+            break
+    log.info("Pixabay API phonk: found %d tracks", len(tracks))
+    return tracks
 
 
 def _fetch_html(url: str, timeout: int = 15) -> str:
@@ -160,18 +216,42 @@ def _pixabay_track_name(audio_url: str) -> str:
     return f"pixabay_phonk_{stem}.mp3"
 
 
-def fetch_phonk_tracks(music_dir: Path, max_tracks: int = 10, max_pages: int = 2) -> list[Path]:
+def fetch_phonk_tracks(
+    music_dir: Path,
+    max_tracks: int = 10,
+    max_pages: int = 2,
+    pixabay_api_key: str | None = None,
+) -> list[Path]:
     """Scrape any reachable source and download up to *max_tracks* MP3s.
 
-    Tries Pixabay first; if every page fails (403/cloudflare), falls back to
-    free-stock-music.com so the music pool is still topped up. Skips files
-    already present. Never raises.
+    If *pixabay_api_key* is provided, tries the Pixabay Music API first.  Then
+    falls back to HTML-scrape Pixabay, then free-stock-music.com.  Skips files
+    already present.  Never raises.
     """
     music_dir = Path(music_dir)
     music_dir.mkdir(parents=True, exist_ok=True)
 
-    pixabay_urls = scrape_pixabay_urls(max_pages=max_pages)
     downloaded: list[Path] = []
+
+    # --- 1. Pixabay API (authoritative, real MP3 CDN links) ---
+    if pixabay_api_key:
+        for track in search_pixabay_api(api_key=pixabay_api_key, max_tracks=max_tracks):
+            if len(downloaded) >= max_tracks:
+                break
+            safe = re.sub(r"[^\w\-. ]", "_", track.name)[:80]
+            dest = music_dir / f"pixabay_api_{safe}.mp3"
+            if dest.exists():
+                downloaded.append(dest)
+                continue
+            if _download(track.url, dest):
+                _write_attribution(music_dir, dest, track)
+                downloaded.append(dest)
+        if downloaded:
+            return downloaded
+        log.info("Pixabay API produced no tracks; trying fallbacks")
+
+    # --- 2. HTML-scrape Pixabay (may 403) ---
+    pixabay_urls = scrape_pixabay_urls(max_pages=max_pages)
 
     if pixabay_urls:
         for audio_url in pixabay_urls:
@@ -242,6 +322,7 @@ def ensure_phonk_tracks(
     min_tracks: int = 2,
     fetch_count: int = 6,
     max_pages: int = 2,
+    pixabay_api_key: str | None = None,
 ) -> None:
     """Top up *music_dir* with license-safe tracks when it is too sparse.
 
@@ -258,5 +339,10 @@ def ensure_phonk_tracks(
         log.info("music_dir already has %d tracks; skipping fetch", len(existing))
         return
     log.info("music_dir sparse (%d tracks); fetching royalty-free tracks", len(existing))
-    fetch_phonk_tracks(music_dir, max_tracks=fetch_count, max_pages=max_pages)
+    fetch_phonk_tracks(
+        music_dir,
+        max_tracks=fetch_count,
+        max_pages=max_pages,
+        pixabay_api_key=pixabay_api_key,
+    )
 
