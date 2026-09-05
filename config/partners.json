@@ -1,0 +1,86 @@
+{
+  "updated": "2026-09-05",
+  "niche": "cs2-gaming-shorts",
+  "programs": [
+    {
+      "name": "Razer Affiliate Program",
+      "type": "direct-brand",
+      "signup_url": "https://www.razer.com/affiliate",
+      "niche_fit": "Top-tier gaming peripherals (mice, keyboards, headsets, chairs, laptops). Perfect for CS2 setup vlogs, peripheral showcases, and 'best gear for CS2' short-form content; strong brand recognition with the esports audience.",
+      "commission_note": "Up to 15% per sale per Razer's current program page; historically 3-10% by product category (peripherals lowest, systems/laptops higher). New Razer.com program uses a 14-day conversion window; coupon/cashback affiliates capped at 1%.",
+      "notes": "Managed via Impact.com (official) and other networks regionally. Approval is manual - expect a review of your channel/traffic. Disclosure of affiliate relationships is required; do NOT frame as 'Razer sponsor' unless actually sponsored."
+    },
+    {
+      "name": "Logitech / Logitech G Affiliate Program",
+      "type": "direct-brand",
+      "signup_url": "https://www.logitech.com/en-us/programs/affiliate-program",
+      "niche_fit": "Logitech G gaming mice, keyboards, headsets and streaming gear are ubiquitous in FPS/CS2 setups, making them a natural fit for setup-tour and gaming-peripheral Shorts. Also covers Astro and Blue brands.",
+      "commission_note": "Commission varies by region and product; Logitech G programs typically pay ~4-10% per sale (Daisycon/BlueAff listings show ~1.6-7.8%; US Impact program ~4-5%). 30-day cookie in most programs.",
+      "notes": "Registration runs through Impact.com (and FlexOffers/Daisycon regionally). Brand-bidding via paid ads is not allowed; direct linking discouraged. Applies mostly in covered regions (US, CA, MX, EMEA), so verify your geo."
+    },
+    {
+      "name": "NordVPN Affiliate Program",
+      "type": "digital-product",
+      "signup_url": "https://nordvpn.com/affiliate-signup/",
+      "niche_fit": "Gamers buy VPNs for DDoS protection, ping/lag reduction and regional unlocks - a strong pain-point angle for CS2 content. Recurring commission means one referral keeps paying.",
+      "commission_note": "100% commission on 1-month plans, 40% on 1-2 year plans, and 30% recurring on all renewals; 30-day cookie. Runs on NordVPN's own in-house program (dashboard at affiliates.nordvpn.com).",
+      "notes": "No website required - they explicitly accept YouTube/social channels. Do not use 'advertised savings' claims without substantiation; e.g. don't promise ping drops as a guaranteed result. Requires disclosure on sponsored/affiliate placements."
+    },
+    {
+      "name": "ExitLag Affiliate Program",
+      "type": "digital-product",
+      "signup_url": "https://www.exitlag.com/be-affiliate",
+      "niche_fit": "Game-specific connection optimizer that reduces ping/jitter/lag and boosts FPS - directly relevant to CS2 competitive play. Popular with the CS/latency-optimization content crowd, especially EU/SA audiences.",
+      "commission_note": "Tiered 10% (Silver) up to 30% (Diamond) commission per NEW subscription; tier advances with conversions. $50 USD minimum withdrawal to PayPal. Commissions mature after a 30-day period.",
+      "notes": "In-house program with near-instant approval; free keys/account perks at higher tiers. Only new subscriptions are commissionable (re-subscribing ex-users are not). Disclosure required; avoid guaranteed-percentage 'ping drop' claims."
+    },
+    {
+      "name": "Secretlab Affiliate Program",
+      "type": "direct-brand",
+      "signup_url": "https://secretlab.co/pages/affiliates",
+      "niche_fit": "Premium gaming chairs/desks used by esports pros - high-ticket item with strong commission per sale. Great for CS2 'upgrade your setup' content even with lower conversion; one sale can outweigh dozens of small-ticket ones.",
+      "commission_note": "Up to 12% per sale per official affiliates page (commonly cited 5-8% via Impact). Monthly payouts via PayPal, ~7-day cookie (recent sources) to 30-day (older).",
+      "notes": "Runs via Impact.com - needs a solid-looking publisher profile. High AOV but researched purchase; short-form video is discovery, longer/setup content converts. Keep ergonomic claims factual (support/comfort, no guaranteed health outcomes)."
+    },
+    {
+      "name": "Humble Bundle Affiliate Program",
+      "type": "digital-product",
+      "signup_url": "https://www.humblebundle.com/partner",
+      "niche_fit": "Pay-what-you-want game/software bundles and store - easy impulse-buy angle for CS2 and PC gaming Shorts ('deal of the day'), plus Humble Choice subscription. Charity angle improves trust and conversion.",
+      "commission_note": "Typically ~4-10% per sale (up to 15% claimed by some trackers); higher rates on bundles. Runs via Impact and CJ (CJ signup: signup.cj.com cid=5693148); 30-day cookie.",
+      "notes": "Trademark terms/domain names cannot be used in paid promotion (SEM restrictions). One-time commission per purchase (not recurring for Choice/monthly unless stated). Disclosure required; fine for 'legit deals' content."
+    },
+    {
+      "name": "Green Man Gaming Affiliate Program",
+      "type": "digital-product",
+      "signup_url": "https://www.greenmangaming.com/affiliates",
+      "niche_fit": "Authorized PC game-key retailer (official keys from 700+ publishers) - a trust-safe place to send CS2-viewer game recommendations. Two tracks: Business (website) and Influencer Ambassador (YouTubers/TikTok) with giveaways and Discord.",
+      "commission_note": "Up to 5% per sale (2% base), 10% on GMG Bundles; 30-day cookie; ~$50 minimum payout. Runs via Impact.com.",
+      "notes": "Key-sourcing is official/publisher-direct, avoiding grey-market concerns. Ambassador program suits short-form creators and includes weekly key giveaways for content. Disclosure of affiliate links is required by their terms."
+    },
+    {
+      "name": "CS.TRADE Affiliate Program",
+      "type": "direct-brand",
+      "signup_url": "https://cs.trade/affiliate",
+      "niche_fit": "CS2 (and Rust/TF2/Dota 2) skin trading marketplace and store - the single most CS2-specific commercial program here, targeting viewers who trade/buy skins. 1% lifetime commission on referral trade volume and store purchases.",
+      "commission_note": "1% of the total value your referral deposits/trades/purchases, paid forever; referrers' first-trade bonus up to $30. Crypto-friendly payouts.",
+      "notes": "CAUTION: in-game skin trading sits in a grey compliance zone. It is a marketplace/store (not a gambling/case site), but verify YouTube/TikTok monetization rules on real-money trading and always disclose the affiliate relationship. Do not position skins as investments or guaranteed income."
+    },
+    {
+      "name": "TradeUpSpy Affiliate Program",
+      "type": "direct-brand",
+      "signup_url": "https://www.tradeupspy.com/affiliate",
+      "niche_fit": "Free CS2 trade-up contract simulator/odds tool - a utility CS2 players actually use for min-maxing skin trade-ups. Highly relevant to CS2-specifcy 'trade up' and skin-economy content.",
+      "commission_note": "Commission structure not publicly disclosed - requires reaching out via their affiliate page; treat terms as TBD until confirmed by the operator.",
+      "notes": "Small, bootstrapped CS2 tool - verify current program status and terms directly with the site before building content around it. Include attribution/disclosure. Lower drop-out risk than case-opening sites."
+    },
+    {
+      "name": "Impact.com (Partnership Marketplace)",
+      "type": "network",
+      "signup_url": "https://app.impact.com/signup/none/create-new-mediapartner-account-flow.ihtml",
+      "niche_fit": "Not a merchant itself - it is the network hosting Razer, Logitech, Secretlab, Elgato, Humble and many other gaming/peripheral programs. One publisher account lets you browse and apply to dozens of gaming merchants and manage payouts centrally.",
+      "commission_note": "Commission varies per merchant program (many gaming brands 4-12%+ here); network fees generally not charged to publishers. Monthly payout cycles per brand contract.",
+      "notes": "Requires a verifiable traffic source (channel/site) for marketplace approval - small channels may be approved at lower tier. Pairs well as a 'hub' account: apply to many gaming programs from one login. Disclosure/attribution rules follow each brand contract."
+    }
+  ]
+}
