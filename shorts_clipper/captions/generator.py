@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -307,6 +308,42 @@ def generate_ass_file(
 
 
 # ---------------------------------------------------------------------------
+# Ad-card text helpers
+# ---------------------------------------------------------------------------
+
+# A promo code bound to a single dash-free/URL-free word: 4-12 alphanumerics.
+_OFFER_CODE_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z0-9]{4,12}(?![A-Za-z0-9])")
+
+
+def _split_ad_card_text(text: str) -> tuple[str, str | None]:
+    """Split ad-card CTA text into (body, offer_code).
+
+    A code is recognized either by an explicit ``code=``/``code:`` marker or
+    as a standalone all-caps alphanumeric word that is not embedded in a URL.
+    Returns the body without the code and the matched code (or ``None``).
+    """
+    explicit = re.search(r"(?i)\bcode\s*[=:]\s*([A-Z0-9]{4,12})\b", text)
+    if explicit:
+        code = explicit.group(1)
+        body = text.replace(explicit.group(0), "").strip()
+        return (re.sub(r"\s{2,}", " ", body).strip(" ,:;-"), code)
+
+    for candidate in _OFFER_CODE_RE.findall(text):
+        # Skip codes that are part of a URL/path token (e.g. "example.com/ABC123").
+        start = text.find(candidate)
+        before = text[max(0, start - 1) : start]
+        after = text[start + len(candidate) : start + len(candidate) + 1]
+        if before in "/.:@=" or after in "/.:@=":
+            continue
+        body = text[:start].rstrip(" ,:;-")
+        body = body + " " + text[start + len(candidate) :].lstrip(" ,:;-")
+        body = re.sub(r"\s{2,}", " ", body).strip()
+        return (body, candidate)
+
+    return (text, None)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -330,6 +367,7 @@ def burn_subtitles(
     ad_card_text: str | None = None,
     ad_card_start: float = 0.0,
     ad_card_duration: float | None = None,
+    peak_second: float | None = None,
     hook_banner_text: str | None = None,
 ) -> Path:
     """
@@ -360,6 +398,11 @@ def burn_subtitles(
         ad_card_text:   Optional CTA text banner shown with the ad card.
         ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
         ad_card_duration: How long the card is visible (None => until end of clip).
+        peak_second:    Optional peak/sell moment (seconds, relative to the trimmed
+                        clip).  When positive, overrides ``ad_card_start`` so the
+                        card lands at the peak (clamped to the clip duration and
+                        at least ~1.2s before the end).  When absent, the default
+                        ``ad_card_start`` behavior is kept unchanged.
         hook_banner_text:  Optional hook caption burned into the first ~1 s of
                           the clip (upper-third, bold yellow, black border,
                           fades out).  ``None`` or empty disables it.
@@ -378,6 +421,28 @@ def burn_subtitles(
     if ad_image and not use_ad_image:
         log.warning("Affiliate ad card image not found, skipping image overlay: %s", ad_image)
     ad_text = ad_card_text if ad_card_text else None
+
+    # Peak-aware ad-card timing: when a positive peak_second is supplied, anchor
+    # the card on the sell moment instead of the fixed default start. Clamp it to
+    # the clip duration and keep it at least ~1.2s from the end so it is visible.
+    card_body, offer_code = (
+        _split_ad_card_text(ad_text) if ad_text else (ad_text, None)
+    )
+    clip_duration = None
+    if peak_second is not None and peak_second > 0:
+        try:
+            from shorts_clipper.utils.video import get_video_metadata
+
+            clip_duration = get_video_metadata(video_path).duration
+        except Exception:
+            clip_duration = None
+        if clip_duration is not None and clip_duration > 0:
+            _start = min(float(peak_second), max(0.0, clip_duration - 1.2))
+            if _start > 0:
+                ad_card_start = _start
+                if ad_card_duration is not None:
+                    ad_card_duration = min(ad_card_duration, clip_duration - ad_card_start)
+                    ad_card_duration = max(ad_card_duration, 0.0)
 
     with tempfile.TemporaryDirectory(prefix="ass_") as tmp:
         ass_path = Path(tmp) / "subs.ass"
@@ -439,7 +504,12 @@ def burn_subtitles(
             font_arg = f"fontfile='{fontfile.replace(':', '\\:')}':"
 
         # Mid-roll ad card window; None => until end of clip (per-frame check)
-        ad_end = ad_card_start + ad_card_duration if ad_card_duration is not None else 999999.0
+        if ad_card_duration is not None:
+            ad_end = ad_card_start + ad_card_duration
+            if clip_duration is not None:
+                ad_end = min(ad_end, clip_duration)
+        else:
+            ad_end = clip_duration if clip_duration is not None else 999999.0
 
         # Hook banner drawtext filter (first ~1 s, upper-third, bold yellow, fades out)
         hook_filter = ""
@@ -456,6 +526,45 @@ def burn_subtitles(
 
         # Any video overlay (banner, ad card image, or drawtext CTA)?
         video_overlay = use_banner or use_ad_image or bool(ad_text)
+
+        def _append_ad_drawtext(parts: list[str], current: str, out: str) -> str:
+            """Append the ad-card CTA drawtext chain, returning the out label.
+
+            Without an offer code it's a single card line; with an offer code
+            the code is drawn as a distinct highlighted line (larger, amber)
+            just above the card box for a prominent call-to-action.
+            """
+            if not ad_text:
+                parts.append(f"[{current}]null[{out}]")
+                return out
+
+            enable = f"enable='between(t,{ad_card_start},{ad_end})'"
+            # Main card box (body text, or the full CTA when no code).
+            card_text = card_body if offer_code else ad_text
+            body_path = Path(tmp) / "ad_text.txt"
+            body_path.write_text(card_text, encoding="utf-8")
+            body_escaped = str(body_path).replace("\\", "/").replace(":", "\\:")
+            if offer_code:
+                code_path = Path(tmp) / "ad_code.txt"
+                code_path.write_text(offer_code, encoding="utf-8")
+                code_escaped = str(code_path).replace("\\", "/").replace(":", "\\:")
+                # Code line: larger, bold amber, sits above the card box.
+                parts.append(
+                    f"[{current}]drawtext={font_arg}textfile='{code_escaped}':"
+                    "fontsize=H/10:fontcolor=0xFFBF00:text_align=center:"
+                    "borderw=6:bordercolor=black:box=1:boxcolor=black@0.7:boxborderw=20:"
+                    f"x=(w-text_w)/2:y=H-h-560:"
+                    f"{enable}[{out}]"
+                )
+                return out
+            parts.append(
+                f"[{current}]drawtext={font_arg}textfile='{body_escaped}':"
+                f"fontsize=H/14:fontcolor=white:borderw=3:bordercolor=black:"
+                f"box=1:boxcolor=black@0.75:boxborderw=28:"
+                f"x=(w-text_w)/2:y=H-h-400:"
+                f"{enable}[{out}]"
+            )
+            return out
 
         if use_bgm:
             # A single -filter_complex must carry BOTH the video chain (with any
@@ -482,19 +591,7 @@ def burn_subtitles(
                 )
                 current = "v2"
 
-            if ad_text:
-                text_path = Path(tmp) / "ad_text.txt"
-                text_path.write_text(ad_text, encoding="utf-8")
-                text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
-                parts.append(
-                    f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
-                    f"fontsize=H/14:fontcolor=white:borderw=3:bordercolor=black:"
-                    f"box=1:boxcolor=black@0.75:boxborderw=28:"
-                    f"x=(w-text_w)/2:y=H-h-400:"
-                    f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
-                )
-            else:
-                parts.append(f"[{current}]null[vout]")
+            _append_ad_drawtext(parts, current, "vout")
 
             bgm_vol = float(bgm_volume)
             bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
@@ -545,19 +642,7 @@ def burn_subtitles(
                 )
                 current = "v2"
 
-            if ad_text:
-                text_path = Path(tmp) / "ad_text.txt"
-                text_path.write_text(ad_text, encoding="utf-8")
-                text_escaped = str(text_path).replace("\\", "/").replace(":", "\\:")
-                parts.append(
-                    f"[{current}]drawtext={font_arg}textfile='{text_escaped}':"
-                    f"fontsize=H/14:fontcolor=white:borderw=3:bordercolor=black:"
-                    f"box=1:boxcolor=black@0.75:boxborderw=28:"
-                    f"x=(w-text_w)/2:y=H-h-400:"
-                    f"enable='between(t,{ad_card_start},{ad_end})'[vout]"
-                )
-            else:
-                parts.append(f"[{current}]null[vout]")
+            _append_ad_drawtext(parts, current, "vout")
 
             filter_complex = ";".join(parts)
 

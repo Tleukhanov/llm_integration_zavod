@@ -740,6 +740,14 @@ def run(
                             affiliate_partner
                         ),
                     }
+                    # In gameplay mode the audio/emotion peak is known — pass it
+                    # so the card lands on the sell moment (generator clamps it).
+                    if settings.gameplay_mode:
+                        peak_abs_val = peaks_by_start.get(round(window.start, 2))
+                        if peak_abs_val is not None:
+                            ad_card_kwargs["peak_second"] = (
+                                peak_abs_val - buffered_start - trim_start
+                            )
                     if affiliate_partner.banner_path:
                         ad_card_kwargs["ad_card_image"] = affiliate_partner.banner_path
 
