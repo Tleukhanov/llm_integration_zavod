@@ -102,6 +102,17 @@ def run(
     configure_logging(settings.log_level)
     log.info("🚀 PIPELINE START: %s (extracting %d clip(s))", url, count)
 
+    try:
+        from shorts_clipper.core.processed_store import ProcessedStore, extract_video_id
+
+        _store = ProcessedStore.from_path(settings.processed_videos_path)
+        _vid = extract_video_id(url)
+        if _store.is_processed(_vid):
+            log.warning("Video %s already processed — skipping reprocess.", _vid)
+            return []
+    except Exception as _store_err:
+        log.warning("Processed-store check failed (continuing): %s", _store_err)
+
     settings.output_dir.mkdir(parents=True, exist_ok=True)
 
     from shorts_clipper.core.observability import get_run_context
@@ -1005,6 +1016,16 @@ def run(
     # Export observability artifacts and verify
     run_ctx.export_all()
     run_ctx.verify_run()
+
+    if output_paths:
+        try:
+            from shorts_clipper.core.processed_store import ProcessedStore, extract_video_id
+
+            ProcessedStore.from_path(settings.processed_videos_path).mark_processed(
+                extract_video_id(url), url, title=source_title
+            )
+        except Exception as _store_err:
+            log.warning("Failed to record processed video %s: %s", url, _store_err)
 
     if count == 1:
         log.info("\n✅ SUCCESS — Single clip ready at: %s", output_paths[0])

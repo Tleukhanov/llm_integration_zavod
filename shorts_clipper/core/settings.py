@@ -105,6 +105,7 @@ class Settings:
     compliance_auto_disclaimers: bool = True
     compliance_report_dir: Path = Path("outputs/compliance")
     output_aspect: str = "vertical"
+    processed_videos_path: str = "data/processed_videos.json"
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -442,4 +443,8 @@ class Settings:
             compliance_auto_disclaimers=compliance_auto_disclaimers,
             compliance_report_dir=compliance_report_dir,
             output_aspect=output_aspect,
+            processed_videos_path=_env(
+                "SHORTS_PROCESSED_VIDEOS_PATH", file_values, "data/processed_videos.json"
+            )
+            or "data/processed_videos.json",
         )
