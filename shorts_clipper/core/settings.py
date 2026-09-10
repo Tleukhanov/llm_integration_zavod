@@ -106,6 +106,7 @@ class Settings:
     compliance_report_dir: Path = Path("outputs/compliance")
     output_aspect: str = "vertical"
     processed_videos_path: str = "data/processed_videos.json"
+    processed_check_enabled: bool = False
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -447,4 +448,8 @@ class Settings:
                 "SHORTS_PROCESSED_VIDEOS_PATH", file_values, "data/processed_videos.json"
             )
             or "data/processed_videos.json",
+            processed_check_enabled=(
+                _env("SHORTS_PROCESSED_CHECK_ENABLED", file_values, "false") or "false"
+            ).lower()
+            in {"1", "true", "yes", "on"},
         )
