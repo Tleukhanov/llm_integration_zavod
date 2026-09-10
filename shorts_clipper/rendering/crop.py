@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 from shorts_clipper.cropping.geometry import compute_center_crop
+from shorts_clipper.rendering.render_effects import render_transform
 from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 from shorts_clipper.utils.video import get_video_metadata
 
@@ -23,35 +24,43 @@ _WIDE_W = 1920
 _WIDE_H = 1080
 
 
-def _build_crop_filter(src_w: int, src_h: int, layout: str) -> str:
+def _build_crop_filter(
+    src_w: int, src_h: int, layout: str, *, seed: int | None = None
+) -> str:
     """Return an FFmpeg -vf / -filter_complex string for the requested layout."""
     src_ratio = src_w / src_h
 
     if layout == "crop_left":
         scale_h = _TARGET_H
         scale_w = max(_TARGET_W, round(_TARGET_H * src_ratio) // 2 * 2)
-        return f"scale={scale_w}:{scale_h},crop={_TARGET_W}:{_TARGET_H}:0:0,setsar=1"
-
-    if layout == "crop_right":
+        base = f"scale={scale_w}:{scale_h},crop={_TARGET_W}:{_TARGET_H}:0:0,setsar=1"
+    elif layout == "crop_right":
         scale_h = _TARGET_H
         scale_w = max(_TARGET_W, round(_TARGET_H * src_ratio) // 2 * 2)
         x_offset = scale_w - _TARGET_W
-        return f"scale={scale_w}:{scale_h},crop={_TARGET_W}:{_TARGET_H}:{x_offset}:0,setsar=1"
+        base = f"scale={scale_w}:{scale_h},crop={_TARGET_W}:{_TARGET_H}:{x_offset}:0,setsar=1"
+    else:
+        # Default: crop_center — compute precise center crop box
+        crop = compute_center_crop(
+            width=src_w,
+            height=src_h,
+            target_width=_TARGET_W,
+            target_height=_TARGET_H,
+        )
+        # Scale so the crop region exactly fills the target frame
+        scale = max(_TARGET_W / crop.width, _TARGET_H / crop.height)
+        scaled_w = round(src_w * scale) // 2 * 2
+        scaled_h = round(src_h * scale) // 2 * 2
+        x = (scaled_w - _TARGET_W) // 2
+        y = (scaled_h - _TARGET_H) // 2
+        base = f"scale={scaled_w}:{scaled_h},crop={_TARGET_W}:{_TARGET_H}:{x}:{y},setsar=1"
 
-    # Default: crop_center — compute precise center crop box
-    crop = compute_center_crop(
-        width=src_w,
-        height=src_h,
-        target_width=_TARGET_W,
-        target_height=_TARGET_H,
-    )
-    # Scale so the crop region exactly fills the target frame
-    scale = max(_TARGET_W / crop.width, _TARGET_H / crop.height)
-    scaled_w = round(src_w * scale) // 2 * 2
-    scaled_h = round(src_h * scale) // 2 * 2
-    x = (scaled_w - _TARGET_W) // 2
-    y = (scaled_h - _TARGET_H) // 2
-    return f"scale={scaled_w}:{scaled_h},crop={_TARGET_W}:{_TARGET_H}:{x}:{y},setsar=1"
+    if seed is not None:
+        effects = render_transform(seed, _TARGET_W, _TARGET_H)
+        if effects:
+            base = f"{base},{','.join(effects)}"
+
+    return base
 
 
 def process_to_vertical(
@@ -64,6 +73,7 @@ def process_to_vertical(
     video_codec: str = "libx264",
     start_time: float | None = None,
     duration: float | None = None,
+    seed: int | None = None,
 ) -> Path:
     """
     Crop and scale a video to 1080×1920 vertical using pure FFmpeg.
@@ -75,6 +85,7 @@ def process_to_vertical(
         crf: Constant rate factor (18 = near-lossless, 23 = default).
         preset: FFmpeg x264 preset (fast / medium / slow).
         video_codec: FFmpeg video encoder codec to use.
+        seed: Optional seed for visual uniqueness transform.
 
     Returns:
         Path to the output file.
@@ -86,7 +97,7 @@ def process_to_vertical(
     output_path = Path(output_path)
 
     meta = get_video_metadata(str(input_path))
-    vf = _build_crop_filter(meta.width, meta.height, layout)
+    vf = _build_crop_filter(meta.width, meta.height, layout, seed=seed)
 
     log.info(
         "\n--- VERTICAL CROP [%s] %dx%d → %dx%d ---",
@@ -149,7 +160,9 @@ def process_to_vertical(
     return output_path
 
 
-def _build_wide_crop_filter(src_w: int, src_h: int, layout: str) -> str:
+def _build_wide_crop_filter(
+    src_w: int, src_h: int, layout: str, *, seed: int | None = None
+) -> str:
     """Return an FFmpeg -vf string for a 16:9 (1920×1080) wide crop."""
     src_ratio = src_w / src_h
     target_ratio = _WIDE_W / _WIDE_H
@@ -157,27 +170,33 @@ def _build_wide_crop_filter(src_w: int, src_h: int, layout: str) -> str:
     if layout == "crop_left":
         scale_h = _WIDE_H
         scale_w = max(_WIDE_W, round(_WIDE_H * src_ratio) // 2 * 2)
-        return f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:0:0,setsar=1"
-
-    if layout == "crop_right":
+        base = f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:0:0,setsar=1"
+    elif layout == "crop_right":
         scale_h = _WIDE_H
         scale_w = max(_WIDE_W, round(_WIDE_H * src_ratio) // 2 * 2)
         x_offset = scale_w - _WIDE_W
-        return f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:{x_offset}:0,setsar=1"
+        base = f"scale={scale_w}:{scale_h},crop={_WIDE_W}:{_WIDE_H}:{x_offset}:0,setsar=1"
+    else:
+        # Default: crop_center — reuse compute_center_crop with wide targets
+        crop = compute_center_crop(
+            width=src_w,
+            height=src_h,
+            target_width=_WIDE_W,
+            target_height=_WIDE_H,
+        )
+        scale = max(_WIDE_W / crop.width, _WIDE_H / crop.height)
+        scaled_w = round(src_w * scale) // 2 * 2
+        scaled_h = round(src_h * scale) // 2 * 2
+        x = (scaled_w - _WIDE_W) // 2
+        y = (scaled_h - _WIDE_H) // 2
+        base = f"scale={scaled_w}:{scaled_h},crop={_WIDE_W}:{_WIDE_H}:{x}:{y},setsar=1"
 
-    # Default: crop_center — reuse compute_center_crop with wide targets
-    crop = compute_center_crop(
-        width=src_w,
-        height=src_h,
-        target_width=_WIDE_W,
-        target_height=_WIDE_H,
-    )
-    scale = max(_WIDE_W / crop.width, _WIDE_H / crop.height)
-    scaled_w = round(src_w * scale) // 2 * 2
-    scaled_h = round(src_h * scale) // 2 * 2
-    x = (scaled_w - _WIDE_W) // 2
-    y = (scaled_h - _WIDE_H) // 2
-    return f"scale={scaled_w}:{scaled_h},crop={_WIDE_W}:{_WIDE_H}:{x}:{y},setsar=1"
+    if seed is not None:
+        effects = render_transform(seed, _WIDE_W, _WIDE_H)
+        if effects:
+            base = f"{base},{','.join(effects)}"
+
+    return base
 
 
 def process_to_wide(
@@ -190,6 +209,7 @@ def process_to_wide(
     video_codec: str = "libx264",
     start_time: float | None = None,
     duration: float | None = None,
+    seed: int | None = None,
 ) -> Path:
     """
     Crop and scale a video to 1920×1080 wide (16:9) using pure FFmpeg.
@@ -203,6 +223,7 @@ def process_to_wide(
         video_codec: FFmpeg video encoder codec to use.
         start_time: Optional seek offset in seconds.
         duration: Optional max duration in seconds.
+        seed: Optional seed for visual uniqueness transform.
 
     Returns:
         Path to the output file.
@@ -214,7 +235,7 @@ def process_to_wide(
     output_path = Path(output_path)
 
     meta = get_video_metadata(str(input_path))
-    vf = _build_wide_crop_filter(meta.width, meta.height, layout)
+    vf = _build_wide_crop_filter(meta.width, meta.height, layout, seed=seed)
 
     log.info(
         "\n--- WIDE CROP [%s] %dx%d → %dx%d ---",
