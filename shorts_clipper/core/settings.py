@@ -107,6 +107,9 @@ class Settings:
     output_aspect: str = "vertical"
     processed_videos_path: str = "data/processed_videos.json"
     processed_check_enabled: bool = False
+    vo_enabled: bool = False
+    vo_voice: str = "en-US-GuyNeural"
+    vo_rate: str = "+8%"
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -452,4 +455,10 @@ class Settings:
                 _env("SHORTS_PROCESSED_CHECK_ENABLED", file_values, "false") or "false"
             ).lower()
             in {"1", "true", "yes", "on"},
+            vo_enabled=(
+                _env("SHORTS_VO_ENABLED", file_values, "false") or "false"
+            ).lower() in {"1", "true", "yes", "on"},
+            vo_voice=_env("SHORTS_VO_VOICE", file_values, "en-US-GuyNeural")
+            or "en-US-GuyNeural",
+            vo_rate=_env("SHORTS_VO_RATE", file_values, "+8%") or "+8%",
         )

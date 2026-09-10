@@ -369,6 +369,7 @@ def burn_subtitles(
     ad_card_duration: float | None = None,
     peak_second: float | None = None,
     hook_banner_text: str | None = None,
+    vo_output_path: str | Path | None = None,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -406,6 +407,8 @@ def burn_subtitles(
         hook_banner_text:  Optional hook caption burned into the first ~1 s of
                           the clip (upper-third, bold yellow, black border,
                           fades out).  ``None`` or empty disables it.
+        vo_output_path:   Optional voiceover WAV file mixed on top of game
+                          audio for an extra original audio layer.
 
     Returns:
         Path to the output video.
@@ -496,6 +499,16 @@ def burn_subtitles(
         if use_bgm:
             cmd.extend(["-i", str(music)])
             bgm_index = input_idx
+            input_idx += 1
+
+        vo = Path(vo_output_path) if vo_output_path is not None else None
+        use_vo = vo is not None and vo.is_file()
+        if vo is not None and not use_vo:
+            log.warning("Voiceover audio file not found, skipping voiceover: %s", vo)
+        if use_vo:
+            cmd.extend(["-i", str(vo)])
+            vo_index = input_idx
+            input_idx += 1
 
         # Drawtext font — use a Windows font but fallback to default if missing
         fontfile = "C:/Windows/Fonts/arialbd.ttf"
@@ -606,16 +619,30 @@ def burn_subtitles(
                 # 0.55 to make room, and a final limiter stops post-mix clipping.
                 parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
                 parts.append("[0:a]volume=0.550[prog]")
-                parts.append(
-                    f"[prog][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
-                    f"[mix]{audio_post},alimiter=limit=0.97[aout]"
-                )
+                if use_vo:
+                    parts.append(f"[{vo_index}:a]volume=0.700[vo]")
+                    parts.append(
+                        f"[prog][bg][vo]amix=inputs=3:duration=first:dropout_transition=0:normalize=0[mix];"
+                        f"[mix]{audio_post},alimiter=limit=0.97[aout]"
+                    )
+                else:
+                    parts.append(
+                        f"[prog][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
+                        f"[mix]{audio_post},alimiter=limit=0.97[aout]"
+                    )
             else:
                 parts.append(f"[{bgm_index}:a]volume={bgm_vol:.3f}[bg]")
-                parts.append(
-                    f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
-                    f"{audio_post}[aout]"
-                )
+                if use_vo:
+                    parts.append(f"[{vo_index}:a]volume=0.700[vo]")
+                    parts.append(
+                        f"[0:a][bg][vo]amix=inputs=3:duration=first:dropout_transition=0[mix];[mix]"
+                        f"{audio_post}[aout]"
+                    )
+                else:
+                    parts.append(
+                        f"[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+                        f"{audio_post}[aout]"
+                    )
 
             filter_complex = ";".join(parts)
             cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"])
@@ -644,14 +671,52 @@ def burn_subtitles(
 
             _append_ad_drawtext(parts, current, "vout")
 
-            filter_complex = ";".join(parts)
-
-            cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
+            if use_vo:
+                bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
+                if pacing != 1.0:
+                    audio_post = "atempo={},{}".format(pacing, ",".join(bgm_af))
+                else:
+                    audio_post = ",".join(bgm_af)
+                parts.append(f"[{vo_index}:a]volume=1.400[vo]")
+                parts.append(
+                    f"[0:a][vo]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+                    f"{audio_post}[aout]"
+                )
+                filter_complex = ";".join(parts)
+                cmd.extend(
+                    ["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"]
+                )
+            else:
+                filter_complex = ";".join(parts)
+                cmd.extend(
+                    ["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"]
+                )
         else:
-            simple_vf = vf
-            if hook_filter:
-                simple_vf += f",{hook_filter}"
-            cmd.extend(["-vf", simple_vf])
+            if use_vo:
+                bgm_af = [p for p in af_parts if not p.startswith("atempo=")]
+                if pacing != 1.0:
+                    audio_post = "atempo={},{}".format(pacing, ",".join(bgm_af))
+                else:
+                    audio_post = ",".join(bgm_af)
+                parts = [f"[0:v]{vf}[v0]"]
+                current = "v0"
+                if hook_filter:
+                    parts.append(f"[{current}]{hook_filter}[vh]")
+                    current = "vh"
+                parts.append(f"[{vo_index}:a]volume=1.400[vo]")
+                parts.append(
+                    f"[0:a][vo]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]"
+                    f"{audio_post}[aout]"
+                )
+                filter_complex = ";".join(parts)
+                cmd.extend(
+                    ["-filter_complex", filter_complex, "-map", f"[{current}]", "-map", "[aout]"]
+                )
+            else:
+                simple_vf = vf
+                if hook_filter:
+                    simple_vf += f",{hook_filter}"
+                cmd.extend(["-vf", simple_vf])
 
         cmd.extend(["-c:v", video_codec])
 
@@ -662,7 +727,7 @@ def burn_subtitles(
         else:
             cmd.extend(["-preset", preset])
 
-        audio_args = [] if use_bgm else ["-af", ",".join(af_parts)]
+        audio_args = [] if (use_bgm or use_vo) else ["-af", ",".join(af_parts)]
         cmd.extend(
             audio_args
             + [
