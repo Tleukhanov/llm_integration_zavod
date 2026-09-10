@@ -18,6 +18,7 @@ import logging
 import math
 import random
 import tempfile
+import zlib
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -622,6 +623,34 @@ def run(
                             shifted_segments.append(replace(s, start=new_start, end=new_end))
                 precision_segments = shifted_segments
 
+                # Deterministic per-clip seed for the visual-transform layer.
+                render_seed = zlib.crc32(
+                    f"{url}|{idx}|{round(window.start, 2)}".encode()
+                ) & 0xFFFFFFFF
+
+                vo_output_path = None
+                if getattr(settings, "vo_enabled", False):
+                    try:
+                        from shorts_clipper.audio.tts import (
+                            build_voiceover_text,
+                            synthesize_voiceover,
+                        )
+
+                        vo_text = build_voiceover_text(
+                            precision_segments, clip_duration=duration
+                        )
+                        if vo_text:
+                            vo_output_path = synthesize_voiceover(
+                                vo_text,
+                                clip_work_dir / "vo.wav",
+                                voice=settings.vo_voice,
+                                rate=settings.vo_rate,
+                            )
+                    except Exception as _vo_err:
+                        log.warning(
+                            "TTS voiceover failed, continuing without: %s", _vo_err
+                        )
+
                 # ── Step 3: Vertical crop + Trim ──────────────────────────────
                 log.info("\n--- VERTICAL CROP & TRIM ---")
                 if progress_callback:
@@ -640,6 +669,7 @@ def run(
                         preset=settings.video_preset,
                         start_time=trim_start,
                         duration=duration,
+                        seed=render_seed,
                     )
 
                 # ── Step 3b: Wide crop (if requested) ───────────────────────
@@ -654,6 +684,7 @@ def run(
                         preset=settings.video_preset,
                         start_time=trim_start,
                         duration=duration,
+                        seed=render_seed,
                     )
 
                 # ── Step 4: Burn subtitles + 1.15× pacing (single pass) ───────
@@ -762,6 +793,7 @@ def run(
                     preset=settings.video_preset,
                     style_name=settings.subtitle_style,
                     hook_banner_text=settings.hook_banner_text if settings.hook_banner_enabled else None,
+                    vo_output_path=vo_output_path,
                     **banner_kwargs,
                     **bgm_kwargs,
                     **ad_card_kwargs,
@@ -783,6 +815,7 @@ def run(
                         preset=settings.video_preset,
                         style_name=settings.subtitle_style,
                         hook_banner_text=settings.hook_banner_text if settings.hook_banner_enabled else None,
+                        vo_output_path=vo_output_path,
                         **banner_kwargs,
                         **bgm_kwargs,
                         **ad_card_kwargs,
