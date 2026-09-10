@@ -111,6 +111,140 @@ def select_affiliate_partner(
     return enabled[round_robin_index % len(enabled)]
 
 
+def import_from_research(
+    research_path: str | Path = "config/partners.json",
+    output_path: str | Path = "affiliate_partners.json",
+) -> list[AffiliatePartner]:
+    """Convert the research ``config/partners.json`` list into operational
+    ``AffiliatePartner`` records and write them as a JSON array.
+
+    Returns the converted list; on any error an empty list is returned after
+    logging a warning so callers never crash.
+    """
+    research_path = Path(research_path)
+    output_path = Path(output_path)
+
+    if not research_path.exists():
+        log.warning("Research partners file not found: %s", research_path)
+        return []
+
+    try:
+        raw = json.loads(research_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("Failed to parse research partners file %s: %s", research_path, exc)
+        return []
+
+    programs = raw.get("programs") if isinstance(raw, dict) else None
+    if not programs:
+        log.warning("No 'programs' list found in %s", research_path)
+        return []
+
+    # --- keyword generation heuristics -----------------------------------
+    _KEYWORD_MAP: dict[str, list[str]] = {
+        "razer": ["razer", "peripherals", "setup", "gear", "keyboard", "mouse"],
+        "logitech": ["logitech", "logi", "peripherals", "setup", "gear", "mouse", "headset"],
+        "nordvpn": ["vpn", "nordvpn", "ping", "lag", "ddos", "security"],
+        "exitlag": ["exitlag", "lag", "ping", "fps", "optimise", "optimize", "connection"],
+        "secretlab": ["secretlab", "chair", "setup", "desk", "ergonomic"],
+        "humble": ["humble", "humble bundle", "games", "deals", "bundle"],
+        "green man": ["green man gaming", "gmg", "games", "keys", "store"],
+        "cs.trade": ["cs.trade", "cs2", "skins", "trade", "trading", "marketplace"],
+        "tradeupspy": ["tradeupspy", "trade up", "trade-up", "skins", "odds", "contract"],
+        "impact": ["impact", "network", "affiliate", "programs"],
+    }
+
+    _NICHE_KEYWORDS: list[str] = [
+        "cs2", "gaming", "setup", "peripherals", "skins", "competitive",
+        "esports", "streaming", "content creator",
+    ]
+
+    def _keywords_for(entry: dict) -> tuple[str, ...]:
+        name_lower = (entry.get("name") or "").lower()
+        type_lower = (entry.get("type") or "").lower()
+        niche_lower = (entry.get("niche_fit") or "").lower()
+        kw: list[str] = []
+
+        for pattern, words in _KEYWORD_MAP.items():
+            if pattern in name_lower:
+                kw.extend(words)
+                break
+
+        if "digital" in type_lower:
+            kw.extend(["digital", "software", "download"])
+        if "network" in type_lower:
+            kw.extend(["network", "marketplace"])
+        if "brand" in type_lower:
+            kw.extend(["brand", "official"])
+
+        for nk in _NICHE_KEYWORDS:
+            if nk in niche_lower and nk not in kw:
+                kw.append(nk)
+
+        # always include the short name slug so basic matching works
+        slug = _slugify(entry.get("name") or "partner")
+        if slug and slug not in kw:
+            kw.append(slug)
+
+        # de-duplicate preserving order
+        seen: set[str] = set()
+        unique: list[str] = []
+        for k in kw:
+            k = k.lower().strip()
+            if k and k not in seen:
+                seen.add(k)
+                unique.append(k)
+        return tuple(unique)
+
+    def _slugify(name: str) -> str:
+        slug = "".join(c if c.isalnum() else "-" for c in name.lower())
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        return slug.strip("-")
+
+    partners: list[AffiliatePartner] = []
+    for entry in programs:
+        if not isinstance(entry, dict):
+            log.warning("Skipping non-dict entry in research programs: %r", entry)
+            continue
+        try:
+            slug = _slugify(entry.get("name") or "partner")
+            partner = AffiliatePartner(
+                id=slug,
+                name=str(entry.get("name") or slug),
+                link_en=str(entry.get("signup_url") or ""),
+                tag="#ad",
+                match_keywords=_keywords_for(entry),
+                enabled=True,
+            )
+            partners.append(partner)
+        except (TypeError, ValueError) as exc:
+            log.warning("Skipping research entry %r: %s", entry.get("name"), exc)
+
+    # Write the operational JSON array
+    try:
+        output_data = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "link_en": p.link_en,
+                "tag": p.tag,
+                "match_keywords": list(p.match_keywords),
+                "enabled": p.enabled,
+            }
+            for p in partners
+        ]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(output_data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        log.info("Wrote %d affiliate partners to %s", len(partners), output_path)
+    except OSError as exc:
+        log.warning("Failed to write affiliate partners to %s: %s", output_path, exc)
+
+    return partners
+
+
 def auto_cta_text(partner: AffiliatePartner) -> str:
     """Build a default CTA for a partner's mid-roll ad card."""
     return f"{partner.name} — скины CS2, ссылка в описании"

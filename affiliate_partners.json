@@ -1,0 +1,199 @@
+[
+  {
+    "id": "razer-affiliate-program",
+    "name": "Razer Affiliate Program",
+    "link_en": "https://www.razer.com/affiliate",
+    "tag": "#ad",
+    "match_keywords": [
+      "razer",
+      "peripherals",
+      "setup",
+      "gear",
+      "keyboard",
+      "mouse",
+      "brand",
+      "official",
+      "cs2",
+      "gaming",
+      "esports",
+      "razer-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "logitech-logitech-g-affiliate-program",
+    "name": "Logitech / Logitech G Affiliate Program",
+    "link_en": "https://www.logitech.com/en-us/programs/affiliate-program",
+    "tag": "#ad",
+    "match_keywords": [
+      "logitech",
+      "logi",
+      "peripherals",
+      "setup",
+      "gear",
+      "mouse",
+      "headset",
+      "brand",
+      "official",
+      "cs2",
+      "gaming",
+      "streaming",
+      "logitech-logitech-g-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "nordvpn-affiliate-program",
+    "name": "NordVPN Affiliate Program",
+    "link_en": "https://nordvpn.com/affiliate-signup/",
+    "tag": "#ad",
+    "match_keywords": [
+      "vpn",
+      "nordvpn",
+      "ping",
+      "lag",
+      "ddos",
+      "security",
+      "digital",
+      "software",
+      "download",
+      "cs2",
+      "nordvpn-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "exitlag-affiliate-program",
+    "name": "ExitLag Affiliate Program",
+    "link_en": "https://www.exitlag.com/be-affiliate",
+    "tag": "#ad",
+    "match_keywords": [
+      "exitlag",
+      "lag",
+      "ping",
+      "fps",
+      "optimise",
+      "optimize",
+      "connection",
+      "digital",
+      "software",
+      "download",
+      "cs2",
+      "competitive",
+      "exitlag-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "secretlab-affiliate-program",
+    "name": "Secretlab Affiliate Program",
+    "link_en": "https://secretlab.co/pages/affiliates",
+    "tag": "#ad",
+    "match_keywords": [
+      "secretlab",
+      "chair",
+      "setup",
+      "desk",
+      "ergonomic",
+      "brand",
+      "official",
+      "cs2",
+      "gaming",
+      "esports",
+      "secretlab-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "humble-bundle-affiliate-program",
+    "name": "Humble Bundle Affiliate Program",
+    "link_en": "https://www.humblebundle.com/partner",
+    "tag": "#ad",
+    "match_keywords": [
+      "humble",
+      "humble bundle",
+      "games",
+      "deals",
+      "bundle",
+      "digital",
+      "software",
+      "download",
+      "cs2",
+      "gaming",
+      "humble-bundle-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "green-man-gaming-affiliate-program",
+    "name": "Green Man Gaming Affiliate Program",
+    "link_en": "https://www.greenmangaming.com/affiliates",
+    "tag": "#ad",
+    "match_keywords": [
+      "green man gaming",
+      "gmg",
+      "games",
+      "keys",
+      "store",
+      "digital",
+      "software",
+      "download",
+      "cs2",
+      "green-man-gaming-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "cs-trade-affiliate-program",
+    "name": "CS.TRADE Affiliate Program",
+    "link_en": "https://cs.trade/affiliate",
+    "tag": "#ad",
+    "match_keywords": [
+      "cs.trade",
+      "cs2",
+      "skins",
+      "trade",
+      "trading",
+      "marketplace",
+      "brand",
+      "official",
+      "cs-trade-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "tradeupspy-affiliate-program",
+    "name": "TradeUpSpy Affiliate Program",
+    "link_en": "https://www.tradeupspy.com/affiliate",
+    "tag": "#ad",
+    "match_keywords": [
+      "tradeupspy",
+      "trade up",
+      "trade-up",
+      "skins",
+      "odds",
+      "contract",
+      "brand",
+      "official",
+      "cs2",
+      "tradeupspy-affiliate-program"
+    ],
+    "enabled": true
+  },
+  {
+    "id": "impact-com-partnership-marketplace",
+    "name": "Impact.com (Partnership Marketplace)",
+    "link_en": "https://app.impact.com/signup/none/create-new-mediapartner-account-flow.ihtml",
+    "tag": "#ad",
+    "match_keywords": [
+      "impact",
+      "network",
+      "affiliate",
+      "programs",
+      "marketplace",
+      "gaming",
+      "impact-com-partnership-marketplace"
+    ],
+    "enabled": true
+  }
+]
