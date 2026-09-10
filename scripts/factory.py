@@ -11,6 +11,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -47,6 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Target clip length in seconds.")
     p.add_argument("--aspect", choices=["vertical", "wide", "both"], default=None,
                    help="Output aspect ratio.")
+    p.add_argument("--channel", default=None,
+                   help="Channel profile name (sets SHORTS_CHANNEL for multi-channel env overlay).")
     return p
 
 
@@ -92,6 +95,9 @@ def _run_round(
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.channel:
+        os.environ["SHORTS_CHANNEL"] = args.channel
 
     from dataclasses import replace
 

@@ -110,11 +110,25 @@ class Settings:
     vo_enabled: bool = False
     vo_voice: str = "en-US-GuyNeural"
     vo_rate: str = "+8%"
+    channel_name: str | None = None
+    channel_creds_dir: str = "data/creds"
+
+    @property
+    def channel_token_dir(self) -> Path:
+        if self.channel_name:
+            return Path(self.channel_creds_dir) / self.channel_name
+        return Path(".cache/shorts-clipper")
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
         path = Path(env_path)
         file_values = _parse_env_file(path)
+
+        channel = os.environ.get("SHORTS_CHANNEL") or file_values.get("SHORTS_CHANNEL")
+        if channel:
+            channel_path = path.with_name(f"{path.name}.{channel}")
+            channel_values = _parse_env_file(channel_path)
+            file_values = {**file_values, **channel_values}
 
         enable_gpu = (_env("SHORTS_ENABLE_GPU", file_values, "false") or "false").lower() in {
             "1",
@@ -461,4 +475,7 @@ class Settings:
             vo_voice=_env("SHORTS_VO_VOICE", file_values, "en-US-GuyNeural")
             or "en-US-GuyNeural",
             vo_rate=_env("SHORTS_VO_RATE", file_values, "+8%") or "+8%",
+            channel_name=channel,
+            channel_creds_dir=_env("SHORTS_CHANNEL_CREDS_DIR", file_values, "data/creds")
+            or "data/creds",
         )

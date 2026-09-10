@@ -67,6 +67,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    default=None,
                    help="Background music mode (SHORTS_BGM_MODE). Default off; "
                         "'always' adds phonk BGM to every clip.")
+    p.add_argument("--channel-profile", default=None, dest="channel_profile",
+                   help="Channel profile name (sets SHORTS_CHANNEL for multi-channel env overlay).")
     return p
 
 
@@ -141,6 +143,9 @@ def _process_batch_items(
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.channel_profile:
+        os.environ["SHORTS_CHANNEL"] = args.channel_profile
 
     from dataclasses import replace
 
