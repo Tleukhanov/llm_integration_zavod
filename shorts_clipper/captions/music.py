@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import wave
 from pathlib import Path
@@ -133,6 +134,11 @@ def pick_track(
     tracks = list_tracks(music_dir)
     if not tracks:
         return None
+    if not os.getenv("SHORTS_ALLOW_PROCEDURAL_MUSIC", "0").lower() in ("1", "true", "on"):
+        tracks = [
+            t for t in tracks
+            if not t.name.startswith("generated_phonk_loop")
+        ]
     if len(tracks) == 1:
         return tracks[0]
     candidates = [t for t in tracks if t != last_track] if last_track else tracks

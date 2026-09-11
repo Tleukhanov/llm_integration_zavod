@@ -122,6 +122,34 @@ class PickTrackTests(unittest.TestCase):
             d = self._make_tracks(Path(tmp), 1)
             self.assertEqual(pick_track(d, random.Random(0)), d / "track_00.mp3")
 
+    def test_procedural_loop_excluded_by_default(self):
+        import os
+        import tempfile
+
+        os.environ.pop("SHORTS_ALLOW_PROCEDURAL_MUSIC", None)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                d = self._make_tracks(Path(tmp), 1)
+                (d / "generated_phonk_loop.wav").write_bytes(b"x")
+                self.assertIsNone(pick_track(d, random.Random(0)))
+        finally:
+            os.environ.pop("SHORTS_ALLOW_PROCEDURAL_MUSIC", None)
+
+    def test_procedural_loop_allowed_with_env(self):
+        import os
+        import tempfile
+
+        os.environ["SHORTS_ALLOW_PROCEDURAL_MUSIC"] = "1"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                d = self._make_tracks(Path(tmp), 1)
+                (d / "generated_phonk_loop.wav").write_bytes(b"x")
+                self.assertEqual(
+                    pick_track(d, random.Random(0)), d / "generated_phonk_loop.wav"
+                )
+        finally:
+            os.environ.pop("SHORTS_ALLOW_PROCEDURAL_MUSIC", None)
+
 
 class SettingsBgmTests(unittest.TestCase):
     def _load(self, env_text: str):

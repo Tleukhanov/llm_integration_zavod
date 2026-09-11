@@ -629,7 +629,8 @@ def run(
                 ) & 0xFFFFFFFF
 
                 vo_output_path = None
-                if getattr(settings, "vo_enabled", False):
+                if getattr(settings, "vo_enabled", False) and not settings.gameplay_mode:
+                    log.info("🎤 Voiceover enabled — synthesizing a punchy narration track")
                     try:
                         from shorts_clipper.audio.tts import (
                             build_voiceover_text,
