@@ -732,7 +732,10 @@ def run(
                 if settings.bgm_mode != "off":
                     bgm_seed = hash(str(current_output_path))
                     run_seed = random.Random(bgm_seed)
-                    if should_use_bgm(settings.bgm_mode, run_seed):
+                    use_bgm = should_use_bgm(settings.bgm_mode, run_seed) or (
+                        settings.bgm_mode == "hybrid" and settings.gameplay_mode
+                    )
+                    if use_bgm:
                         track = pick_track(settings.music_dir, run_seed, last_track)
                         if track is not None:
                             last_track = track

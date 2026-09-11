@@ -46,6 +46,15 @@ class ShouldUseBgmTests(unittest.TestCase):
         for _ in range(5):
             self.assertTrue(should_use_bgm("music", rng))
 
+    def test_always_cli_true(self):
+        rng = random.Random(0)
+        for _ in range(5):
+            self.assertTrue(should_use_bgm("always", rng))
+
+    def test_hybrid_cli_deferred(self):
+        rng = random.Random(0)
+        self.assertFalse(should_use_bgm("hybrid", rng))
+
     def test_auto_true(self):
         rng = random.Random(0)
         for _ in range(3):

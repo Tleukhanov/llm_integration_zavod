@@ -12,9 +12,11 @@ edge-tts internals.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -23,8 +25,22 @@ log = logging.getLogger(__name__)
 _tts_lock = threading.Lock()
 
 
+def _edge_tts_command() -> list[str]:
+    """Return the invokable edge-tts command.
+
+    Prefers the ``edge-tts`` console script when it is on PATH, otherwise
+    falls back to ``python -m edge_tts`` against the current interpreter
+    (independent of whether the venv Scripts dir is on PATH).
+    """
+    if shutil.which("edge-tts") is not None:
+        return ["edge-tts"]
+    if importlib.util.find_spec("edge_tts") is not None:
+        return [sys.executable, "-m", "edge_tts"]
+    return []
+
+
 def _edge_tts_available() -> bool:
-    return shutil.which("edge-tts") is not None
+    return bool(_edge_tts_command())
 
 
 def build_voiceover_text(
@@ -88,8 +104,7 @@ def synthesize_voiceover(
     try:
         with _tts_lock:
             result = subprocess.run(
-                [
-                    "edge-tts",
+                [*_edge_tts_command(),
                     "--voice",
                     voice,
                     "--rate",

@@ -47,6 +47,8 @@ def should_use_bgm(mode: str, rng: random.Random) -> bool:
     mode:
         ``"off"``   – never use bgm
         ``"music"`` – always use bgm
+        ``"always"` – always use bgm (CLI vocabulary)
+        ``"hybrid"` – caller decides (runner ties it to gameplay clips)
         ``"mix50"`` – 50 / 50 coin-flip (deterministic via *rng*)
         ``"auto"``  – always True (future: tie to energetic windows)
     rng:
@@ -54,8 +56,10 @@ def should_use_bgm(mode: str, rng: random.Random) -> bool:
     """
     if mode == "off":
         return False
-    if mode in ("music", "auto"):
+    if mode in ("music", "auto", "always"):
         return True
+    if mode == "hybrid":
+        return False  # contextual: runner resolves it against gameplay_mode
     if mode == "mix50":
         return rng.random() < 0.5
     return False
