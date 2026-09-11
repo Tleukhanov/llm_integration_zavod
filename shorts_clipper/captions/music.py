@@ -139,6 +139,8 @@ def pick_track(
             t for t in tracks
             if not t.name.startswith("generated_phonk_loop")
         ]
+    if not tracks:
+        return None
     if len(tracks) == 1:
         return tracks[0]
     candidates = [t for t in tracks if t != last_track] if last_track else tracks

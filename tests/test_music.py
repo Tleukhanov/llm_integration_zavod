@@ -129,7 +129,8 @@ class PickTrackTests(unittest.TestCase):
         os.environ.pop("SHORTS_ALLOW_PROCEDURAL_MUSIC", None)
         try:
             with tempfile.TemporaryDirectory() as tmp:
-                d = self._make_tracks(Path(tmp), 1)
+                d = Path(tmp) / "music"
+                d.mkdir(parents=True)
                 (d / "generated_phonk_loop.wav").write_bytes(b"x")
                 self.assertIsNone(pick_track(d, random.Random(0)))
         finally:
@@ -142,7 +143,8 @@ class PickTrackTests(unittest.TestCase):
         os.environ["SHORTS_ALLOW_PROCEDURAL_MUSIC"] = "1"
         try:
             with tempfile.TemporaryDirectory() as tmp:
-                d = self._make_tracks(Path(tmp), 1)
+                d = Path(tmp) / "music"
+                d.mkdir(parents=True)
                 (d / "generated_phonk_loop.wav").write_bytes(b"x")
                 self.assertEqual(
                     pick_track(d, random.Random(0)), d / "generated_phonk_loop.wav"
