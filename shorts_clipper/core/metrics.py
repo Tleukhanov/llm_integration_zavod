@@ -184,6 +184,66 @@ class MetricsStore:
         ).fetchall()
         return [r["channel"] for r in rows]
 
+    def _channel_avg_median_views(self, channel: str) -> tuple[float | None, float | None]:
+        """(avg, median) of ``views`` over published clips for *channel*."""
+        values = [
+            r["views"]
+            for r in self._conn.execute(
+                "SELECT views FROM clips "
+                "WHERE channel=? AND published=1 AND views IS NOT NULL "
+                "ORDER BY views",
+                (channel,),
+            ).fetchall()
+        ]
+        n = len(values)
+        if n == 0:
+            return None, None
+        avg = sum(values) / n
+        mid = n // 2
+        if n % 2 == 1:
+            median = float(values[mid])
+        else:
+            median = (values[mid - 1] + values[mid]) / 2.0
+        return avg, median
+
+    def channel_performance(self, limit: int = 10) -> list[dict]:
+        """Aggregate real-world performance per source channel.
+
+        ``produced``/``published``/``with_stats``/``views``/``likes``/
+        ``comments`` count all rows for the channel (matching
+        :meth:`stats_channel`), while ``avg_views`` and ``median_views`` are
+        computed strictly over **published** clips with a non-NULL ``views``,
+        so never-collected rows cannot dilute the figures the scout feedback
+        loop is based on. Rows are sorted by ``avg_views`` descending and
+        capped at *limit*.
+        """
+        rows = self._conn.execute(
+            "SELECT channel, "
+            "COUNT(*) AS produced, "
+            "SUM(CASE WHEN published=1 THEN 1 ELSE 0 END) AS published, "
+            "SUM(CASE WHEN collected_at IS NOT NULL THEN 1 ELSE 0 END) AS with_stats, "
+            "SUM(views) AS views, SUM(likes) AS likes, SUM(comments) AS comments "
+            "FROM clips WHERE channel <> '' GROUP BY channel"
+        ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            avg, median = self._channel_avg_median_views(row["channel"])
+            out.append(
+                {
+                    "channel": row["channel"],
+                    "produced": row["produced"] or 0,
+                    "published": row["published"] or 0,
+                    "with_stats": row["with_stats"] or 0,
+                    "views": row["views"] or 0,
+                    "likes": row["likes"] or 0,
+                    "comments": row["comments"] or 0,
+                    "avg_views": round(avg, 1) if avg is not None else 0.0,
+                    "median_views": round(median, 1) if median is not None else None,
+                }
+            )
+        out.sort(key=lambda r: r["avg_views"], reverse=True)
+        return out[:limit]
+
     def top_hooks(self, limit: int = 10) -> list[dict]:
         """Best-performing hook texts by average views (non-empty only)."""
         rows = self._conn.execute(

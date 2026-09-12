@@ -47,6 +47,10 @@ _EMPHASIS_CAP = 5.0
 # --- duration band ------------------------------------------------------------
 _DURATION_DEFAULT = 10.0
 
+# --- channel feedback loop -----------------------------------------------------
+_FEEDBACK_MAX = 10.0
+_FEEDBACK_SATURATION_VIEWS = 100_000.0
+
 
 def _as_int(value: object, default: int) -> int:
     try:
@@ -123,7 +127,31 @@ def _duration_score(video: SourceVideo) -> float:
     return 0.0
 
 
-def score_vod(video: SourceVideo, now: datetime | None = None) -> float:
+def feedback_bonus(channel, performance_map: dict | None) -> float:
+    """Return a ``[0, _FEEDBACK_MAX]`` extra for *channel* based on real stats.
+
+    ``performance_map`` maps a source channel name to its average real-world
+    views per clip (see ``MetricsStore.channel_performance``). Channels that
+    have already proven they pull views get a boost capped at ``_FEEDBACK_MAX``
+    so the feedback can never dominate the other score components; unknown
+    channels and empty maps score ``0``.
+    """
+    if not channel or not performance_map:
+        return 0.0
+    try:
+        avg_views = float(performance_map.get(channel) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if avg_views <= 0:
+        return 0.0
+    return min(_FEEDBACK_MAX, _FEEDBACK_MAX * avg_views / _FEEDBACK_SATURATION_VIEWS)
+
+
+def score_vod(
+    video: SourceVideo,
+    now: datetime | None = None,
+    performance: dict | None = None,
+) -> float:
     """Return a viral-potential heuristic in ``[0, 100]`` for *video*.
 
     Weights: recency up to 25 (full marks inside 3 days, linear decay to 0 by
@@ -131,6 +159,11 @@ def score_vod(video: SourceVideo, now: datetime | None = None) -> float:
     15 when unknown), title keywords up to 25 (+5 per hype token, +1 per ``!``
     capped at 5, 0 otherwise) and duration band up to 20 (20 for 20-60 min,
     15 for 60-90, 5 for 10-20 or 90-180, 10 when unknown, else 0).
+
+    ``performance`` optionally maps a source-channel name to its average
+    real-world views (see :func:`feedback_bonus`); a channel with a proven
+    track record receives up to ``_FEEDBACK_MAX`` bonus points. ``None`` keeps
+    the original pure-heuristic behaviour and is fully backward compatible.
     """
     now_utc = now
     if now_utc is None:
@@ -143,6 +176,7 @@ def score_vod(video: SourceVideo, now: datetime | None = None) -> float:
         + _velocity_score(video)
         + _keyword_score(video.title or "")
         + _duration_score(video)
+        + feedback_bonus(_extra_value(video, "channel"), performance)
     )
     return max(0.0, min(100.0, total))
 
@@ -152,12 +186,15 @@ def rank_vods(
     *,
     min_recent_days: int | None = None,
     max_results: int = 10,
+    performance: dict | None = None,
 ) -> list[SourceVideo]:
     """Sort *videos* by ``score_vod`` descending, optionally filtered by recency.
 
     When ``min_recent_days`` is set, VODs without a parseable ``upload_date``
     are dropped along with anything older than the cutoff. Ties break by
     ``video_id`` lexicographically, so ordering is fully deterministic.
+    *performance* is forwarded to ``score_vod`` to apply the channel feedback
+    bonus (see :func:`feedback_bonus`); ``None`` keeps the classic behaviour.
     """
     cutoff: datetime | None = None
     if min_recent_days is not None:
@@ -169,7 +206,7 @@ def rank_vods(
             uploaded = _parse_upload_date(video)
             if uploaded is None or uploaded < cutoff:
                 continue
-        scored.append((score_vod(video), video))
+        scored.append((score_vod(video, performance=performance), video))
 
     scored.sort(key=lambda pair: (-pair[0], pair[1].video_id))
     return [video for _, video in scored[:max_results]]

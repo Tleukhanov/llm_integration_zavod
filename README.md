@@ -141,6 +141,8 @@ Commands:
 | `SHORTS_CACHE_DIR` | `.cache/shorts-clipper` | Cache directory |
 | `SHORTS_MODELS_DIR` | `models` | Whisper models directory |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
+| `SHORTS_METRICS_PATH` | `data/metrics.sqlite` | SQLite path for produced-clip metrics; powers the scout channel-feedback bonus |
+| `SHORTS_FACTORY_DAILY_CAP` | `6` | Max clips to publish per channel per day |
 | `OPENAI_API_KEY` | — | OpenAI API key (if using `openai` provider) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (if using `anthropic` provider) |
 

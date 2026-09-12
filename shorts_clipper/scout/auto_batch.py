@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from shorts_clipper.core.processed_store import ProcessedStore
@@ -14,6 +15,36 @@ log = logging.getLogger(__name__)
 _CHANNEL_PROVIDER = "youtube_channels"
 
 
+def _load_performance_map(metrics_db: str | Path | None, settings: Any) -> dict | None:
+    """Load ``{channel: avg_views}`` from the metrics store, best-effort.
+
+    Uses *metrics_db* when given, otherwise falls back to ``settings.metrics_path``.
+    Returns ``None`` (the pre-feedback behaviour) when no path is configured,
+    the file is missing, or reading it fails, so the pipeline degrades
+    gracefully instead of crashing discovery.
+    """
+    db_path: str | Path | None = metrics_db
+    if db_path is None:
+        db_path = getattr(settings, "metrics_path", None)
+    if not db_path:
+        return None
+    path = Path(db_path)
+    if not path.exists():
+        return None
+    try:
+        from shorts_clipper.core.metrics import MetricsStore
+
+        store = MetricsStore(path)
+        try:
+            rows = store.channel_performance()
+        finally:
+            store.close()
+    except Exception:
+        log.warning("Could not load channel performance map from %s", path, exc_info=True)
+        return None
+    return {row["channel"]: row["avg_views"] for row in rows if row["avg_views"]}
+
+
 def auto_discover(
     settings: Any,
     query: str = "cs2 gameplay",
@@ -22,11 +53,13 @@ def auto_discover(
     channels: tuple[str, ...] | None = None,
     min_recent_days: int | None = None,
     ranking: bool = True,
+    metrics_db: str | Path | None = None,
 ) -> list[dict]:
     """Find VODs not yet in the processed store and return them as dicts.
 
     Args:
-        settings: Application settings object exposing ``processed_videos_path``.
+        settings: Application settings object exposing ``processed_videos_path``
+            (and optionally ``metrics_path``).
         query: Free-text search term forwarded to each provider.
         providers: Tuple of registered provider names to invoke.
         max_results: Maximum number of fresh results to return.
@@ -36,6 +69,11 @@ def auto_discover(
             days (and any VOD without a parseable upload date).
         ranking: Sort results with ``rank_vods`` (trend score desc) instead of
             raw discovery order; adds ``score`` and ``source`` keys to each dict.
+        metrics_db: Optional path to the clip metrics sqlite. When provided
+            (or when ``settings.metrics_path`` points at an existing file) the
+            channel performance feedback map is loaded once and threaded into
+            ranking, so proven source channels get a score bonus. A missing or
+            unreadable DB is ignored gracefully.
 
     Returns:
         List of dicts with keys ``url``, ``video_id``, ``title``, ``platform``,
@@ -72,11 +110,18 @@ def auto_discover(
                 candidates.append((source_kind, video))
 
         if ranking:
+            performance = _load_performance_map(metrics_db, settings)
             videos = [v for _, v in candidates]
             scores_map: dict[str, float] = {
-                v.video_id: round(score_vod(v), 1) for _, v in candidates
+                v.video_id: round(score_vod(v, performance=performance), 1)
+                for _, v in candidates
             }
-            ordered = rank_vods(videos, min_recent_days=min_recent_days, max_results=max_results)
+            ordered = rank_vods(
+                videos,
+                min_recent_days=min_recent_days,
+                max_results=max_results,
+                performance=performance,
+            )
         else:
             scores_map = {}
             ordered = [v for _, v in candidates[:max_results]]
