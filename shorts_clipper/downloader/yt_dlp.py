@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
+from shorts_clipper.core import download_cache as dl_cache
 from shorts_clipper.core.exceptions import SUBTITLE_NOT_AVAILABLE, YOUTUBE_RATE_LIMIT_429
 from shorts_clipper.core.models import TranscriptSegment
 from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
@@ -42,13 +45,12 @@ def get_subtitle_metrics() -> dict:
 
 
 def get_base_yt_dlp_cmd() -> list[str]:
-    import random
-    import sys
-
     cmd = [
         sys.executable,
         "-m",
         "yt_dlp",
+        "--extractor-retries",
+        "3",
         "--extractor-args",
         "youtube:player_client=default,-android_sdkless",
     ]
@@ -66,6 +68,97 @@ def get_base_yt_dlp_cmd() -> list[str]:
         if proxies:
             cmd.extend(["--proxy", random.choice(proxies)])
     return cmd
+
+
+_YOUTUBE_ID_RE = re.compile(
+    r"(?:v=|youtu\.be/|youtube\.com/(?:shorts|embed|live|watch)/)([A-Za-z0-9_-]{11})"
+)
+
+
+def video_id_from_url(url: str | None) -> str | None:
+    """Extract a YouTube video_id from common URL shapes (or None)."""
+    if not url:
+        return None
+    m = _YOUTUBE_ID_RE.search(url)
+    return m.group(1) if m else None
+
+
+def _client_list() -> list[str]:
+    override = os.environ.get("SHORTS_YT_DLP_PLAYER_CLIENTS")
+    if override:
+        clients = [c.strip() for c in override.split(";") if c.strip()]
+        if clients:
+            return clients
+    return ["default,-android_sdkless", "tv"]
+
+
+def _impersonate_flag() -> list[str]:
+    try:
+        import curl_cffi  # noqa: F401
+
+        return ["--impersonate", "Chrome"]
+    except ImportError:
+        return []
+
+
+def _cmd_variants(*, partial: bool) -> list[list[str]]:
+    """Ordered yt-dlp ``--extractor-args`` variants to try on HTTP 403/429.
+
+    Partial (`--download-sections`) downloads lose impersonation: yt-dlp hands
+    section cutting to ffmpeg, and impersonating an outer TLS fingerprint for
+    those post-processing requests caused 403s historically. Client order can
+    be overridden via ``SHORTS_YT_DLP_PLAYER_CLIENTS`` (semicolon-separated).
+    """
+    variants: list[list[str]] = []
+    for client in _client_list():
+        arg = f"youtube:player_client={client}"
+        if partial:
+            variants.append(["--extractor-args", arg])
+        else:
+            variants.append(["--extractor-args", arg] + _impersonate_flag())
+            if _impersonate_flag():
+                variants.append(["--extractor-args", arg])
+    return variants or [[]]
+
+
+def _variant_prefix() -> list[str]:
+    cmd = [sys.executable, "-m", "yt_dlp", "--extractor-retries", "3"]
+    proxy_str = os.environ.get("SHORTS_PROXY")
+    if proxy_str:
+        proxies = [p.strip() for p in proxy_str.split(",") if p.strip()]
+        if proxies:
+            cmd.extend(["--proxy", random.choice(proxies)])
+    return cmd
+
+
+def _run_with_fallbacks(
+    variants: list[list[str]],
+    tail: list[str],
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    """Run yt-dlp, switching player_client on HTTP 403/429 until exhausted."""
+    for idx, extra in enumerate(variants):
+        cmd = _variant_prefix() + extra + tail
+        try:
+            return subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise
+        except subprocess.CalledProcessError as err:
+            err_str = err.stderr.decode(errors="ignore") if err.stderr else ""
+            blocked = "403" in err_str or "429" in err_str or "too many requests" in err_str.lower()
+            if blocked and idx < len(variants) - 1:
+                delay = 2 * (idx + 1)
+                log.warning(
+                    "yt-dlp HTTP block (403/429) with variant %d/%d; "
+                    "switching player-client in %ds",
+                    idx + 1,
+                    len(variants),
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
 
 
 def _ffmpegwrapper_dir(src_ffmpeg: Path) -> Path:
@@ -133,12 +226,23 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
     """
     Download subtitles (auto or manual) from YouTube for the configured languages.
 
-    Retries with exponential backoff on rate-limit (429) errors.
+    Retries with exponential backoff on rate-limit (429) errors, switching the
+    player-client first. Successful parses are cached per video_id, so repeat
+    runs of the same VOD do not touch YouTube for subtitles at all.
+
     Returns parsed TranscriptSegment list, or empty list if unavailable.
     """
     log.info("\n--- FETCHING NATIVE SUBTITLES ---")
     output_base = work_dir / "subs"
     langs = _subtitle_langs()
+    vid = video_id_from_url(url)
+
+    cached = dl_cache.subtitle_cache_hit(vid, langs) if vid else None
+    if cached is not None:
+        log.info("Using cached subtitles for %s (%d segments)", url, len(cached))
+        return [
+            TranscriptSegment(start=s["start"], end=s["end"], text=s["text"]) for s in cached
+        ]
 
     last_err_str = ""
     for attempt in range(1, max_retries + 1):
@@ -147,30 +251,27 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
             for old_srt in work_dir.glob(mask):
                 old_srt.unlink(missing_ok=True)
 
-        cmd = get_base_yt_dlp_cmd()
-        cmd.extend(
-            [
-                "--write-auto-subs",
-                "--write-subs",
-                "--sub-lang",
-                _sub_lang_arg(langs),
-                "--sub-format",
-                "srt/best",
-                "--convert-subs",
-                "srt",
-                "--skip-download",
-                "--socket-timeout",
-                "15",
-                "--retries",
-                "3",
-                "-o",
-                str(output_base),
-                "--",
-                url,
-            ]
-        )
+        tail = [
+            "--write-auto-subs",
+            "--write-subs",
+            "--sub-lang",
+            _sub_lang_arg(langs),
+            "--sub-format",
+            "srt/best",
+            "--convert-subs",
+            "srt",
+            "--skip-download",
+            "--socket-timeout",
+            "15",
+            "--retries",
+            "3",
+            "-o",
+            str(output_base),
+            "--",
+            url,
+        ]
         try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+            _run_with_fallbacks(_cmd_variants(partial=False), tail, timeout=120)
         except subprocess.TimeoutExpired:
             log.warning(
                 "Subtitle fetch timed out for %s (attempt %d/%d)", url, attempt, max_retries
@@ -189,7 +290,8 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
             if is_rate_limit:
                 _subtitle_metrics["rate_limit_429"] += 1
                 log.warning("YouTube 429 rate limit during subtitle fetch for %s", url)
-                # Fail fast on 429, it is an IP-level block. Retrying is pointless.
+                # Fail fast on 429 after player-client fallbacks, it is an
+                # IP-level block. Retrying is pointless.
                 _subtitle_metrics["fetch_failure"] += 1
                 raise YOUTUBE_RATE_LIMIT_429("Rate limited by YouTube") from None
             elif is_forbidden:
@@ -233,6 +335,8 @@ def fetch_subtitles(url: str, work_dir: Path, max_retries: int = 3) -> list[Tran
 
         log.info("✅ Loaded %d subtitle segments.", len(segments))
         _subtitle_metrics["fetch_success"] += 1
+        if vid:
+            dl_cache.store_subtitles(vid, langs, segments)
         return segments
 
     # Exhausted retries
@@ -247,8 +351,23 @@ def download_audio(
     start_time: float | None = None,
     end_time: float | None = None,
 ) -> Path:
-    """Download best audio only for transcription."""
+    """Download best audio only for transcription.
+
+    Completed downloads are cached per video_id + section, so re-processing a
+    VOD reuses the local artifact instead of re-downloading (and re-triggering
+    YouTube throttling).
+    """
     output_path = Path(output_path)
+
+    vid = video_id_from_url(url)
+    cached = dl_cache.cache_hit(vid, "audio", start_time, end_time, ".m4a") if vid else None
+    if cached:
+        if dl_cache.restore_media(output_path, cached):
+            log.info(
+                "♻️ Using cached audio for %s (section %s-%s)", url, start_time, end_time
+            )
+            return output_path
+        log.warning("Cached audio existed but could not be restored; re-downloading")
 
     # Clean up leftovers from previous partial downloads
     part_path = Path(str(output_path) + ".part")
@@ -261,23 +380,21 @@ def download_audio(
     else:
         log.info("⬇ Downloading full audio from %s", url)
 
-    cmd = get_base_yt_dlp_cmd()
-    cmd.extend(
-        [
-            "--retries",
-            "5",
-            "--socket-timeout",
-            "15",
-            "--extract-audio",
-            "-f",
-            "ba[ext=m4a]/ba[ext=mp3]/ba",
-            "-o",
-            str(output_path),
-        ]
-    )
+    partial = start_time is not None and end_time is not None
+    tail = [
+        "--retries",
+        "5",
+        "--socket-timeout",
+        "15",
+        "--extract-audio",
+        "-f",
+        "ba[ext=m4a]/ba[ext=mp3]/ba",
+        "-o",
+        str(output_path),
+    ]
 
-    if start_time is not None and end_time is not None:
-        cmd.extend(["--download-sections", f"*{start_time}-{end_time}"])
+    if partial:
+        tail.extend(["--download-sections", f"*{start_time}-{end_time}"])
         # Partial downloads require ffmpeg to cut and merge segments. Point
         # yt-dlp at the bundled imageio-ffmpeg binary so it does not fail with
         # "ffmpeg is not installed" in environments without a system ffmpeg.
@@ -286,18 +403,14 @@ def download_audio(
         try:
             src_ffmpeg = Path(ffmpeg_path()).resolve()
             ffmpeg_dir = _ffmpegwrapper_dir(src_ffmpeg)
-            cmd.extend(["--ffmpeg-location", str(ffmpeg_dir)])
+            tail.extend(["--ffmpeg-location", str(ffmpeg_dir)])
         except RuntimeError as exc:
             log.warning("ffmpeg not available for partial download: %s", exc)
-        # ffmpeg doesn't support curl_cffi impersonation, which causes 403s
-        if "--impersonate" in cmd:
-            idx = cmd.index("--impersonate")
-            del cmd[idx : idx + 2]
 
-    cmd.extend(["--", url])
+    tail.extend(["--", url])
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
+        _run_with_fallbacks(_cmd_variants(partial=partial), tail, timeout=1800)
     except subprocess.TimeoutExpired:
         log.error("Audio download timed out after 30 minutes: %s", url)
         raise
@@ -309,6 +422,8 @@ def download_audio(
         elif "403" in err_str:
             log.warning("YouTube Access Forbidden (403) detected during audio download!")
         raise
+    if vid:
+        dl_cache.store_media(vid, "audio", start_time, end_time, output_path)
     log.info("✅ Audio download complete: %s", output_path)
     return output_path
 
@@ -344,6 +459,20 @@ def download_clip(
     """
     output_path = Path(output_path)
 
+    vid = video_id_from_url(url)
+    if vid and output_path.suffix:
+        cached = dl_cache.cache_hit(vid, "video", start_time, end_time, output_path.suffix)
+        if cached:
+            if dl_cache.restore_media(output_path, cached):
+                log.info(
+                    "♻️ Using cached clip for %s (section %s-%s)",
+                    url,
+                    start_time,
+                    end_time,
+                )
+                return output_path
+            log.warning("Cached clip existed but could not be restored; re-downloading")
+
     # Clean up leftovers from previous partial downloads
     part_path = Path(str(output_path) + ".part")
     for p in (output_path, part_path):
@@ -355,25 +484,23 @@ def download_clip(
     else:
         log.info("⬇ Downloading full video from %s", url)
 
-    cmd = get_base_yt_dlp_cmd()
-    cmd.extend(
-        [
-            "--retries",
-            "5",
-            "--fragment-retries",
-            "5",
-            "--socket-timeout",
-            "15",
-            "--no-part",
-            "-f",
-            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-            "-o",
-            str(output_path),
-        ]
-    )
+    partial = start_time is not None and end_time is not None
+    tail = [
+        "--retries",
+        "5",
+        "--fragment-retries",
+        "5",
+        "--socket-timeout",
+        "15",
+        "--no-part",
+        "-f",
+        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+        "-o",
+        str(output_path),
+    ]
 
-    if start_time is not None and end_time is not None:
-        cmd.extend(["--download-sections", f"*{start_time}-{end_time}"])
+    if partial:
+        tail.extend(["--download-sections", f"*{start_time}-{end_time}"])
         # Partial downloads require ffmpeg to cut and merge segments. Point
         # yt-dlp at the bundled imageio-ffmpeg binary so it does not fail with
         # "ffmpeg is not installed" in environments without a system ffmpeg.
@@ -382,17 +509,13 @@ def download_clip(
         try:
             src_ffmpeg = Path(ffmpeg_path()).resolve()
             ffmpeg_dir = _ffmpegwrapper_dir(src_ffmpeg)
-            cmd.extend(["--ffmpeg-location", str(ffmpeg_dir)])
+            tail.extend(["--ffmpeg-location", str(ffmpeg_dir)])
         except RuntimeError as exc:
             log.warning("ffmpeg not available for partial download: %s", exc)
-        # ffmpeg doesn't support curl_cffi impersonation, which causes 403s
-        if "--impersonate" in cmd:
-            idx = cmd.index("--impersonate")
-            del cmd[idx : idx + 2]
 
-    cmd.extend(["--", url])
+    tail.extend(["--", url])
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=900)
+        _run_with_fallbacks(_cmd_variants(partial=partial), tail, timeout=900)
     except subprocess.TimeoutExpired:
         log.error("Video clip download timed out after 15 minutes: %s", url)
         raise
@@ -404,6 +527,8 @@ def download_clip(
         elif "403" in err_str:
             log.warning("YouTube Access Forbidden (403) detected during video download!")
         raise
+    if vid and output_path.suffix:
+        dl_cache.store_media(vid, "video", start_time, end_time, output_path)
     log.info("✅ Download complete: %s", output_path)
     return output_path
 
@@ -526,6 +651,17 @@ def fetch_video_stats(url: str) -> dict | None:
             url,
         ]
     )
+    vid = video_id_from_url(url)
+    if vid:
+        from shorts_clipper.core.cache import get_cached, set_cached
+
+        cached = get_cached(vid)
+        if cached and "views" in cached:
+            return {
+                "views": cached.get("views"),
+                "likes": cached.get("likes"),
+                "comments": cached.get("comments"),
+            }
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (subprocess.TimeoutExpired, OSError) as exc:
@@ -544,8 +680,14 @@ def fetch_video_stats(url: str) -> dict | None:
     except json.JSONDecodeError as exc:
         log.warning("Video stats JSON parse failed for %s: %s", url, exc)
         return None
-    return {
+    stats = {
         "views": _int_or_none(data.get("view_count")),
         "likes": _int_or_none(data.get("like_count")),
         "comments": _int_or_none(data.get("comment_count")),
     }
+    if vid:
+        try:
+            set_cached(vid, stats)
+        except Exception:
+            pass
+    return stats
