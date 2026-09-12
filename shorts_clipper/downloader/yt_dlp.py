@@ -492,3 +492,60 @@ def search_cc_videos(
         )
     log.info("CC video search %r returned %d result(s)", query, len(results))
     return results
+
+
+def _int_or_none(value) -> int | None:
+    """Coerce a yt-dlp JSON value to int, mapping empties/errors to None."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_video_stats(url: str) -> dict | None:
+    """Fetch current view/like/comment counts for a video via yt-dlp.
+
+    Runs the repo's base yt-dlp command with ``--skip-download
+    --dump-single-json`` and parses the metadata snapshot. Missing or empty
+    counters become ``None``. Returns ``None`` on any failure and never
+    raises. Only reliably works for YouTube videos.
+
+    Returns:
+        ``{"views": int|None, "likes": int|None, "comments": int|None}``.
+    """
+    cmd = get_base_yt_dlp_cmd()
+    cmd.extend(
+        [
+            "--skip-download",
+            "--dump-single-json",
+            "--socket-timeout",
+            "15",
+            "--",
+            url,
+        ]
+    )
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("Video stats fetch failed for %s: %s", url, exc)
+        return None
+    if proc.returncode != 0:
+        err_str = (proc.stderr or "").strip().splitlines()
+        log.warning(
+            "Video stats fetch failed for %s: %s",
+            url,
+            err_str[-1] if err_str else f"yt-dlp exited with code {proc.returncode}",
+        )
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        log.warning("Video stats JSON parse failed for %s: %s", url, exc)
+        return None
+    return {
+        "views": _int_or_none(data.get("view_count")),
+        "likes": _int_or_none(data.get("like_count")),
+        "comments": _int_or_none(data.get("comment_count")),
+    }

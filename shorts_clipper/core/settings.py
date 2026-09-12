@@ -112,6 +112,8 @@ class Settings:
     vo_rate: str = "+8%"
     channel_name: str | None = None
     channel_creds_dir: str = "data/creds"
+    metrics_path: Path = Path("data/metrics.sqlite")
+    factory_daily_cap: int = 6
 
     @property
     def channel_token_dir(self) -> Path:
@@ -185,6 +187,16 @@ class Settings:
             publish_interval_seconds = 30
         if publish_interval_seconds < 0:
             publish_interval_seconds = 30
+
+        try:
+            factory_daily_cap = int(
+                _env("SHORTS_FACTORY_DAILY_CAP", file_values, "6") or "6"
+            )
+        except ValueError:
+            factory_daily_cap = 6
+        if factory_daily_cap < 0:
+            factory_daily_cap = 6
+
         proxy = _env("SHORTS_PROXY", file_values)
 
         platforms_raw = (
@@ -478,4 +490,9 @@ class Settings:
             channel_name=channel,
             channel_creds_dir=_env("SHORTS_CHANNEL_CREDS_DIR", file_values, "data/creds")
             or "data/creds",
+            metrics_path=Path(
+                _env("SHORTS_METRICS_PATH", file_values, "data/metrics.sqlite")
+                or "data/metrics.sqlite"
+            ),
+            factory_daily_cap=factory_daily_cap,
         )
