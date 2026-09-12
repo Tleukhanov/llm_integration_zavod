@@ -1,0 +1,61 @@
+{
+  "_comment": "Pool of CS2 content channels the shorts factory auto-follows. Entries are flat-listed via yt-dlp (videos page) to discover the latest uploads. Mark enabled=false to pause a channel without deleting it. Fields: title (display), platform ('youtube'), uri (channel videos page URL), enabled (bool), optional tags (list[str]).",
+  "sources": [
+    {
+      "title": "Pimp",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@Pimpmuckl/videos",
+      "enabled": true,
+      "tags": ["cs2", "esports", "analysis"]
+    },
+    {
+      "title": "ROZ",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@ROZ_/videos",
+      "enabled": true,
+      "tags": ["cs2", "esports", "montage"]
+    },
+    {
+      "title": "RealMarv",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@RealMarv/videos",
+      "enabled": true,
+      "tags": ["cs2", "esports", "news"]
+    },
+    {
+      "title": "stonemountain64",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@stonemountain64/videos",
+      "enabled": true,
+      "tags": ["cs2", "gameplay", "funny"]
+    },
+    {
+      "title": "bananagaming",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@bananagaming/videos",
+      "enabled": true,
+      "tags": ["cs2", "gameplay", "tips"]
+    },
+    {
+      "title": "Mauisnake",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@Mauisnake/videos",
+      "enabled": true,
+      "tags": ["cs2", "esports", "analysis"]
+    },
+    {
+      "title": "MrMaxim",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@MrMaxim/videos",
+      "enabled": true,
+      "tags": ["cs2", "gameplay", "highlights"]
+    },
+    {
+      "title": "SpunJ",
+      "platform": "youtube",
+      "uri": "https://www.youtube.com/@SpunJ/videos",
+      "enabled": true,
+      "tags": ["cs2", "esports", "analysis"]
+    }
+  ]
+}

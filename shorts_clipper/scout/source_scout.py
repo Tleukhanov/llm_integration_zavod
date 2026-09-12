@@ -122,6 +122,23 @@ _REGISTRY: dict[str, type[SourceProvider]] = {
 }
 
 
+def _register_optional_providers() -> None:
+    """Register providers imported lazily from sibling scout modules.
+
+    Sibling modules import ``SourceVideo``/``_BaseProvider`` back from this
+    module, so the wiring is deferred until after the core registry exists.
+    """
+    try:
+        from shorts_clipper.scout.channel_vods import YouTubeChannelVodsProvider
+    except Exception:  # pragma: no cover - optional module
+        log.warning("Could not load 'youtube_channels' provider", exc_info=True)
+        return
+    _REGISTRY["youtube_channels"] = YouTubeChannelVodsProvider
+
+
+_register_optional_providers()
+
+
 def available_providers() -> dict[str, type[SourceProvider]]:
     """Return a mapping of registered provider names to their classes."""
     return dict(_REGISTRY)
@@ -137,8 +154,12 @@ def scout(
     providers: tuple[str, ...] = ("youtube",),
     limit: int = 5,
     exclude_ids: set[str] | None = None,
+    **kw,
 ) -> list[SourceVideo]:
     """Run *providers* in order, deduplicate by ``video_id``, apply *limit*.
+
+    Extra keyword arguments are forwarded to every provider's ``search`` (e.g.
+    ``channel_urls`` for the YouTube channel-vod provider).
 
     Args:
         query: Free-text search term forwarded to each provider.
@@ -160,7 +181,7 @@ def scout(
         remaining = limit - len(results)
         if remaining <= 0:
             break
-        hits = cls().search(query, limit=remaining, exclude_ids=seen)
+        hits = cls().search(query, limit=remaining, exclude_ids=seen, **kw)
         for v in hits:
             if v.video_id not in seen:
                 seen.add(v.video_id)
