@@ -46,6 +46,16 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Target clip length in seconds.")
     p.add_argument("--aspect", choices=["vertical", "wide", "both"], default=None,
                    help="Output aspect ratio.")
+    p.add_argument("--title-variants", choices=["auto", "fixed"], default="auto",
+                   dest="title_variants",
+                   help="Title A/B strategy across channels (default: 'auto'). "
+                        "'auto' sets SHORTS_TITLE_VARIANT to the channel index "
+                        "(channel 0 -> variant 0, channel 1 -> variant 1, ...). "
+                        "'fixed' pins every channel to variant 1 unless "
+                        "--title-variant N is given.")
+    p.add_argument("--title-variant", type=int, default=-1, dest="title_variant",
+                   help="0-based title candidate index used with "
+                        "--title-variants fixed (default: -1 -> variant 1).")
     return p
 
 
@@ -68,12 +78,19 @@ def main(argv: list[str] | None = None) -> int:
     overall_ok = 0
     overall_err = 0
 
-    for ch in channels:
+    for ch_idx, ch in enumerate(channels):
         print(f"\n{'=' * 60}")
         print(f"  CHANNEL: {ch}")
         print(f"{'=' * 60}")
 
         os.environ["SHORTS_CHANNEL"] = ch
+
+        if args.title_variants == "auto":
+            os.environ["SHORTS_TITLE_VARIANT"] = str(ch_idx)
+        elif args.title_variant >= 0:
+            os.environ["SHORTS_TITLE_VARIANT"] = str(args.title_variant)
+        else:
+            os.environ["SHORTS_TITLE_VARIANT"] = "1"
 
         settings = Settings.from_env()
         overrides: dict = {}

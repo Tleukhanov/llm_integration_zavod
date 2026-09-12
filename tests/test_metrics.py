@@ -290,6 +290,98 @@ class SettingsMetricsTests(unittest.TestCase):
                 settings = Settings.from_env(self._empty_env_path(tmp))
             self.assertEqual(settings.factory_daily_cap, 6)
 
+    def test_title_variant_from_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"SHORTS_TITLE_VARIANT": "3"}):
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertEqual(settings.title_variant, 3)
+
+    def test_title_variant_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with _blank_env():
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertEqual(settings.title_variant, -1)
+
+    def test_title_variant_invalid_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"SHORTS_TITLE_VARIANT": "nope"}):
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertEqual(settings.title_variant, -1)
+
+    def test_publish_hour_start_from_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"SHORTS_FACTORY_PUBLISH_HOUR_START": "22"}):
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertEqual(settings.factory_publish_hour_start, 22)
+
+    def test_publish_hour_end_from_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"SHORTS_FACTORY_PUBLISH_HOUR_END": "6"}):
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertEqual(settings.factory_publish_hour_end, 6)
+
+    def test_publish_hour_default_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with _blank_env():
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertIsNone(settings.factory_publish_hour_start)
+            self.assertIsNone(settings.factory_publish_hour_end)
+
+    def test_publish_hour_invalid_falls_back_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                os.environ,
+                {
+                    "SHORTS_FACTORY_PUBLISH_HOUR_START": "late",
+                    "SHORTS_FACTORY_PUBLISH_HOUR_END": "evening",
+                },
+            ):
+                settings = Settings.from_env(self._empty_env_path(tmp))
+            self.assertIsNone(settings.factory_publish_hour_start)
+            self.assertIsNone(settings.factory_publish_hour_end)
+
+
+class GeminiTitleCandidatesTests(unittest.TestCase):
+    def test_generate_clip_metadata_exposes_candidates(self):
+        from unittest.mock import MagicMock
+
+        from shorts_clipper.providers.gemini import GeminiProvider
+
+        provider = GeminiProvider(api_key="test")
+        mock_response = MagicMock()
+        mock_response.text = (
+            '{"candidates": ['
+            '  {"title": "First title", "total": 90},'
+            '  {"title": "Second title", "total": 80},'
+            '  {"title": "Third title", "total": 70}'
+            '], "selected_title": "Second title",'
+            ' "description": "A description.", "tags": ["cs2", "shorts"]}'
+        )
+        with patch.object(provider, "generate_content", return_value=mock_response):
+            meta = provider.generate_clip_metadata([])
+
+        self.assertEqual(
+            meta["candidates"], ["First title", "Second title", "Third title"]
+        )
+        self.assertEqual(meta["title"], "Second title")
+
+    def test_generate_clip_metadata_candidates_empty_when_absent(self):
+        from unittest.mock import MagicMock
+
+        from shorts_clipper.providers.gemini import GeminiProvider
+
+        provider = GeminiProvider(api_key="test")
+        mock_response = MagicMock()
+        mock_response.text = (
+            '{"selected_title": "Only title",'
+            ' "description": "A description.", "tags": ["cs2"]}'
+        )
+        with patch.object(provider, "generate_content", return_value=mock_response):
+            meta = provider.generate_clip_metadata([])
+
+        self.assertEqual(meta["candidates"], [])
+        self.assertEqual(meta["title"], "Only title")
+
 
 if __name__ == "__main__":
     unittest.main()

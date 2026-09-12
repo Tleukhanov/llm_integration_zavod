@@ -1431,8 +1431,16 @@ Return ONLY valid JSON. No markdown. No commentary.
         )
         log.info("   Tags: %s", tags)
 
+        raw_candidates = data.get("candidates")
+        candidates = (
+            [str(c.get("title", "")).strip() for c in raw_candidates if c.get("title")]
+            if isinstance(raw_candidates, list)
+            else []
+        )
+
         return {
             "title": title,
             "description": description,
             "tags": tags,
+            "candidates": candidates,
         }

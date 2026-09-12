@@ -115,6 +115,9 @@ class Settings:
     channel_creds_dir: str = "data/creds"
     metrics_path: Path = Path("data/metrics.sqlite")
     factory_daily_cap: int = 6
+    title_variant: int = -1
+    factory_publish_hour_start: int | None = None
+    factory_publish_hour_end: int | None = None
 
     @property
     def channel_token_dir(self) -> Path:
@@ -197,6 +200,29 @@ class Settings:
             factory_daily_cap = 6
         if factory_daily_cap < 0:
             factory_daily_cap = 6
+
+        try:
+            title_variant = int(
+                _env("SHORTS_TITLE_VARIANT", file_values, "-1") or "-1"
+            )
+        except ValueError:
+            title_variant = -1
+
+        factory_publish_hour_start: int | None = None
+        raw_hour = _env("SHORTS_FACTORY_PUBLISH_HOUR_START", file_values)
+        if raw_hour:
+            try:
+                factory_publish_hour_start = int(raw_hour)
+            except ValueError:
+                factory_publish_hour_start = None
+
+        factory_publish_hour_end: int | None = None
+        raw_hour = _env("SHORTS_FACTORY_PUBLISH_HOUR_END", file_values)
+        if raw_hour:
+            try:
+                factory_publish_hour_end = int(raw_hour)
+            except ValueError:
+                factory_publish_hour_end = None
 
         proxy = _env("SHORTS_PROXY", file_values)
 
@@ -497,4 +523,7 @@ class Settings:
                 or "data/metrics.sqlite"
             ),
             factory_daily_cap=factory_daily_cap,
+            title_variant=title_variant,
+            factory_publish_hour_start=factory_publish_hour_start,
+            factory_publish_hour_end=factory_publish_hour_end,
         )

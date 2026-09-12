@@ -63,6 +63,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--daily-cap", type=int, default=None, dest="daily_cap",
                    help="Max clips to publish per channel per day "
                         "(default: SHORTS_FACTORY_DAILY_CAP env or 6).")
+    p.add_argument("--title-variant", type=int, default=-1, dest="title_variant",
+                   help="0-based title candidate index for A/B testing "
+                        "(sets SHORTS_TITLE_VARIANT; default: -1 = Gemini's pick).")
     return p
 
 
@@ -130,6 +133,7 @@ def _run_round(
 ) -> tuple[int, int, int]:
     """Run one discovery + clip round. Returns (discovered, clipped, errors)."""
     from shorts_clipper.core.metrics import should_publish_today
+    from shorts_clipper.core.scheduling import in_publish_window
     from shorts_clipper.pipeline.runner import run
     from shorts_clipper.scout.auto_batch import auto_discover
 
@@ -147,7 +151,15 @@ def _run_round(
         title = video.get("title") or video.get("video_id") or url
 
         can_publish = publish
-        if publish and not should_publish_today(store, channel, daily_cap):
+        if publish and not in_publish_window(
+            datetime.now().hour,
+            settings.factory_publish_hour_start,
+            settings.factory_publish_hour_end,
+        ):
+            print(f"PUBLISH WINDOW CLOSED (hour={datetime.now().hour}) — "
+                  "skipping publish for this video (recording as unpublished)")
+            can_publish = False
+        if publish and can_publish and not should_publish_today(store, channel, daily_cap):
             print("DAILY CAP REACHED — skipping publish for this video "
                   "(recording as unpublished)")
             can_publish = False
@@ -187,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.channel:
         os.environ["SHORTS_CHANNEL"] = args.channel
+
+    if args.title_variant >= 0:
+        os.environ["SHORTS_TITLE_VARIANT"] = str(args.title_variant)
 
     from dataclasses import replace
 

@@ -876,6 +876,20 @@ def run(
                     meta["publish_error"] = None
                     log.info("[FALLBACK] title generated: %s", meta["title"])
 
+                # Title A/B: override the winning title with a specific
+                # candidate variant when configured (per-channel automation).
+                candidates = meta.get("candidates") or []
+                if settings.title_variant >= 0 and len(candidates) > 1:
+                    variant = settings.title_variant % len(candidates)
+                    meta["title"] = candidates[variant]
+                    log.info("Title A/B variant %d -> %s", variant, meta["title"])
+                else:
+                    log.debug(
+                        "Title A/B skipped (title_variant=%s, candidates=%d)",
+                        settings.title_variant,
+                        len(candidates),
+                    )
+
                 # Ensure segments are preserved in the metadata sidecar
                 meta["segments"] = [
                     {"start": s.start, "end": s.end, "text": s.text} for s in precision_segments
