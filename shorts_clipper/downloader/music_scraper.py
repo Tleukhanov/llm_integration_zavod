@@ -2,11 +2,13 @@
 
 Tried sources, in order:
 
-1. **Pixabay Music** – large phonk catalog under the Pixabay Content License
+1. **Jamendo API** – open-source music community; CC BY / CC BY-SA tracks
+   suitable for commercial use.  Requires a free Jamendo ``client_id`` API key.
+2. **Pixabay Music** – large phonk catalog under the Pixabay Content License
    (free commercial use, no attribution). No official music API, but CDN MP3
    URLs are embedded in the search HTML. `urlopen` may be blocked (HTTP 403,
    Cloudflare) on some hosts/IPs.
-2. **free-stock-music.com** – royalty-free library; most tracks are CC BY
+3. **free-stock-music.com** – royalty-free library; most tracks are CC BY
    (attribution required). Exposes direct MP3 paths in the search HTML and is
    not Cloudflare-blocked on hosts where Pixabay returns 403, so it acts as a
    robust fallback. We record the artist/title so the caller can add a credit
@@ -83,6 +85,7 @@ class Track:
     name: str
     artist: str | None = None
     license: str | None = None
+    duration: float | None = None
 
 
 _PIXABAY_API_URL = "https://pixabay.com/api/music/"
@@ -136,6 +139,95 @@ def search_pixabay_api(
             break
     log.info("Pixabay API phonk: found %d tracks", len(tracks))
     return tracks
+
+
+_JAMENDO_API_URL = "https://api.jamendo.com/v3.0/tracks/"
+
+
+def search_jamendo_tracks(
+    query: str = "phonk",
+    api_key: str = "",
+    max_tracks: int = 10,
+) -> list[Track]:
+    """Fetch CC BY / CC BY-SA tracks from the Jamendo API using *api_key*.
+
+    Only CC BY and CC BY-SA licences are requested (never the NC/ND variants)
+    so every returned track is safe for commercial use.  Tracks shorter than
+    20 seconds are skipped — they are too short to be a usable BGM bed.
+
+    Returns up to *max_tracks* ``Track`` objects.  Never raises on network
+    errors or malformed payloads – returns an empty list instead so callers
+    can fall back to the next source.
+    """
+    if not api_key:
+        return []
+    params = urllib.parse.urlencode({
+        "client_id": api_key,
+        "search": query,
+        "limit": min(max_tracks, 50),
+        "order": "popularity_week",
+        "audioformat": "mp32",
+        "include": "licenses",
+        "license": "by,by-sa",
+    })
+    url = f"{_JAMENDO_API_URL}?{params}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        log.warning("Jamendo API request failed: %s", exc)
+        return []
+
+    tracks: list[Track] = []
+    for item in data.get("results", []) if isinstance(data, dict) else []:
+        audio_entries = item.get("audio")
+        if not isinstance(audio_entries, list):
+            continue
+        audio_url = ""
+        for entry in audio_entries:
+            if isinstance(entry, dict) and entry.get("audio"):
+                audio_url = entry["audio"]
+                break
+        if not audio_url:
+            continue
+        try:
+            duration = float(item.get("trackduration", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration < 20.0:
+            continue
+        artist = item.get("artist_name") or ""
+        track_license = _jamendo_license_label(item.get("licenses"))
+        tracks.append(
+            Track(
+                url=audio_url,
+                name=f"{item.get('name') or 'Unknown'} - {artist}".strip(" -"),
+                artist=artist or None,
+                license=track_license,
+                duration=duration,
+            )
+        )
+        if len(tracks) >= max_tracks:
+            break
+    log.info("Jamendo API phonk: found %d tracks", len(tracks))
+    return tracks
+
+
+def _jamendo_license_label(licenses) -> str:
+    """Map a Jamendo license blob to ``CC BY`` / ``CC BY-SA`` (else ``CC BY``)."""
+    if isinstance(licenses, list):
+        ids = [str(lic.get("id", "")) for lic in licenses if isinstance(lic, dict)]
+    elif isinstance(licenses, dict):
+        ids = [str(licenses.get("id", ""))]
+    else:
+        ids = []
+    for lic_id in ids:
+        if lic_id.endswith("ccbysa") or "CCBYSA" in lic_id.upper() or "by-sa" in lic_id.lower():
+            return "CC BY-SA"
+        if lic_id.endswith("ccby") or "CCBY" in lic_id.upper() or lic_id.lower() == "by":
+            return "CC BY"
+    return "CC BY"
 
 
 def _fetch_html(url: str, timeout: int = 15) -> str:
@@ -221,19 +313,40 @@ def fetch_phonk_tracks(
     max_tracks: int = 10,
     max_pages: int = 2,
     pixabay_api_key: str | None = None,
+    jamendo_api_key: str | None = None,
 ) -> list[Path]:
     """Scrape any reachable source and download up to *max_tracks* MP3s.
 
-    If *pixabay_api_key* is provided, tries the Pixabay Music API first.  Then
-    falls back to HTML-scrape Pixabay, then free-stock-music.com.  Skips files
-    already present.  Never raises.
+    Source order: Jamendo API (if *jamendo_api_key*), then the Pixabay Music
+    API (if *pixabay_api_key*), then HTML-scrape Pixabay, then
+    free-stock-music.com.  Returns as soon as the first source yields at least
+    one track; continues to the next source only when the current one yields
+    nothing.  Skips files already present.  Never raises.
     """
     music_dir = Path(music_dir)
     music_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded: list[Path] = []
 
-    # --- 1. Pixabay API (authoritative, real MP3 CDN links) ---
+    # --- 1. Jamendo API (CC BY / CC BY-SA, commercial-safe) ---
+    if jamendo_api_key:
+        for track in search_jamendo_tracks(api_key=jamendo_api_key, max_tracks=max_tracks):
+            if len(downloaded) >= max_tracks:
+                break
+            safe = re.sub(r"[^\w\-. ]", "_", track.name)[:80]
+            dest = music_dir / f"jamendo_{safe}.mp3"
+            if dest.exists():
+                downloaded.append(dest)
+                continue
+            if _download(track.url, dest):
+                artist = f"Jamendo ({track.artist})" if track.artist else "Jamendo"
+                _write_attribution(music_dir, dest, track, credit=artist)
+                downloaded.append(dest)
+        if downloaded:
+            return downloaded
+        log.info("Jamendo API produced no tracks; trying fallbacks")
+
+    # --- 2. Pixabay API (authoritative, real MP3 CDN links) ---
     if pixabay_api_key:
         for track in search_pixabay_api(api_key=pixabay_api_key, max_tracks=max_tracks):
             if len(downloaded) >= max_tracks:
@@ -250,7 +363,7 @@ def fetch_phonk_tracks(
             return downloaded
         log.info("Pixabay API produced no tracks; trying fallbacks")
 
-    # --- 2. HTML-scrape Pixabay (may 403) ---
+    # --- 3. HTML-scrape Pixabay (may 403) ---
     pixabay_urls = scrape_pixabay_urls(max_pages=max_pages)
 
     if pixabay_urls:
@@ -302,15 +415,19 @@ def _download(url: str, dest: Path) -> bool:
         return False
 
 
-def _write_attribution(music_dir: Path, dest: Path, track: Track) -> None:
+def _write_attribution(
+    music_dir: Path, dest: Path, track: Track, credit: str | None = None
+) -> None:
     """Persist a credit line for CC-BY tracks so publishers can attribute."""
     credit_file = music_dir / f"{dest.stem}.attribution.txt"
+    if credit is None:
+        credit = "Free Stock Music (free-stock-music.com)"
     try:
         credit_file.write_text(
             f"Track: {track.name}\n"
             f"Source: {track.url}\n"
             f"License: {track.license or 'unknown'}\n"
-            f"Credit: Free Stock Music (free-stock-music.com)\n",
+            f"Credit: {credit}\n",
             encoding="utf-8",
         )
     except OSError:
@@ -323,6 +440,7 @@ def ensure_phonk_tracks(
     fetch_count: int = 6,
     max_pages: int = 2,
     pixabay_api_key: str | None = None,
+    jamendo_api_key: str | None = None,
 ) -> None:
     """Top up *music_dir* with license-safe tracks when it is too sparse.
 
@@ -344,5 +462,6 @@ def ensure_phonk_tracks(
         max_tracks=fetch_count,
         max_pages=max_pages,
         pixabay_api_key=pixabay_api_key,
+        jamendo_api_key=jamendo_api_key,
     )
 

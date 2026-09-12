@@ -95,6 +95,7 @@ class Settings:
     phonk_fetch_max_tracks: int = 6
     phonk_fetch_pages: int = 3
     pixabay_api_key: str | None = None
+    jamendo_api_key: str | None = None
     hook_banner_enabled: bool = True
     hook_banner_text: str = "WAIT FOR IT…"
     hook_judge_enabled: bool = False
@@ -463,6 +464,7 @@ class Settings:
                 _env("SHORTS_PHONK_FETCH_PAGES", file_values, "3") or "3"
             ),
             pixabay_api_key=_env("SHORTS_PIXABAY_API_KEY", file_values),
+            jamendo_api_key=_env("SHORTS_JAMENDO_API_KEY", file_values, "") or "",
             hook_banner_enabled=hook_banner_enabled,
             hook_banner_text=hook_banner_text,
             hook_judge_enabled=hook_judge_enabled,

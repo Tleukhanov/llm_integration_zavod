@@ -458,6 +458,8 @@ def run(
                         min_tracks=settings.phonk_min_tracks,
                         fetch_count=settings.phonk_fetch_max_tracks,
                         max_pages=settings.phonk_fetch_pages,
+                        pixabay_api_key=getattr(settings, "pixabay_api_key", "") or None,
+                        jamendo_api_key=getattr(settings, "jamendo_api_key", "") or None,
                     )
                 except Exception as exc:
                     log.warning("Phonk auto-fetch skipped: %s", exc)
