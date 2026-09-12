@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Shorts Factory trigger
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* 12:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

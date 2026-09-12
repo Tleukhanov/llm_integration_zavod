@@ -1,0 +1,21 @@
+[Unit]
+Description=Shorts Factory — autonomous CS2 shorts pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/shorts-clipper
+EnvironmentFile=/srv/shorts-clipper/.env
+ExecStart=/srv/shorts-clipper/.venv/bin/python scripts/multi_channel.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=shorts-factory
+
+# Safety: kill after 4 hours to prevent runaway
+TimeoutStartSec=14400
+
+[Install]
+WantedBy=multi-user.target

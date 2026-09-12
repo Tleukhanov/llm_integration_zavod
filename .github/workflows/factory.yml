@@ -1,0 +1,57 @@
+name: Shorts Factory
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max clips to produce (0 = no limit)"
+        required: false
+        default: "1"
+
+jobs:
+  factory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write .env from secret
+        if: ${{ secrets.FACTORY_ENV != '' }}
+        run: echo "${{ secrets.FACTORY_ENV }}" > .env
+
+      - name: Skip if no secret
+        if: ${{ secrets.FACTORY_ENV == '' }}
+        run: |
+          echo "::notice::FACTORY_ENV secret is not set — skipping factory run."
+          exit 0
+
+      - name: Compile check
+        run: python -m compileall shorts_clipper scripts -q
+
+      - name: Smoke test
+        run: python -m pytest tests/ -x -q --tb=short || true
+
+      - name: Run factory
+        env:
+          SHORTS_LOG_LEVEL: INFO
+        run: |
+          EXTRA=""
+          if [ "${{ github.event.inputs.limit }}" != "0" ]; then
+            EXTRA="--limit ${{ github.event.inputs.limit }}"
+          fi
+          python scripts/multi_channel.py $EXTRA
