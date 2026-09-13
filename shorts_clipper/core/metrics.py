@@ -28,6 +28,10 @@ class ClipRecord:
     hook: str | None = None
     affiliate_id: str | None = None
     channel: str = ""
+    source_channel: str = ""
+    platform: str | None = None
+    platform_id: str | None = None
+    short_url: str | None = None
     published: bool = False
     publish_ts: str = field(default_factory=_now_iso)
     rendered_path: str | None = None
@@ -42,6 +46,10 @@ CREATE TABLE IF NOT EXISTS clips (
     hook TEXT,
     affiliate_id TEXT,
     channel TEXT,
+    source_channel TEXT,
+    platform TEXT,
+    platform_id TEXT,
+    short_url TEXT,
     published INTEGER DEFAULT 0,
     publish_ts TEXT,
     rendered_path TEXT,
@@ -67,8 +75,19 @@ class MetricsStore:
         self.ensure_schema()
 
     def ensure_schema(self) -> None:
-        """Create the ``clips`` table if it does not exist yet."""
+        """Create the ``clips`` table if it does not exist yet.
+
+        Also migrates pre-existing databases in place by adding any missing
+        ``source_channel`` / ``platform`` / ``platform_id`` / ``short_url``
+        columns, so old metric files keep working without a rebuild.
+        """
         self._conn.execute(_SCHEMA)
+        existing = {
+            r["name"] for r in self._conn.execute("PRAGMA table_info(clips)").fetchall()
+        }
+        for column in ("source_channel", "platform", "platform_id", "short_url"):
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE clips ADD COLUMN {column} TEXT")
         self._conn.commit()
 
     def close(self) -> None:
@@ -83,9 +102,9 @@ class MetricsStore:
         """Insert *rec*, returning ``False`` when the video_id already exists."""
         cur = self._conn.execute(
             "INSERT OR IGNORE INTO clips "
-            "(video_id, source_url, title, hook, affiliate_id, channel, "
+            "(video_id, source_url, title, hook, affiliate_id, channel, source_channel, "
             "published, publish_ts, rendered_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 rec.video_id,
                 rec.source_url,
@@ -93,6 +112,7 @@ class MetricsStore:
                 rec.hook,
                 rec.affiliate_id,
                 rec.channel,
+                rec.source_channel,
                 1 if rec.published else 0,
                 rec.publish_ts,
                 rec.rendered_path,
@@ -107,6 +127,25 @@ class MetricsStore:
             "UPDATE clips SET published=1, publish_ts=COALESCE(?, publish_ts) "
             "WHERE video_id=?",
             (publish_ts, video_id),
+        )
+        self._conn.commit()
+
+    def record_publish(
+        self,
+        video_id: str,
+        platform: str,
+        platform_id: str | None = None,
+        short_url: str | None = None,
+    ) -> None:
+        """Persist publishing metadata for *video_id* (idempotent).
+
+        Stores which platform the clip went live on, the platform-side id and
+        the public short URL, so stats collection can target the published clip
+        itself. Silently does nothing when *video_id* is not recorded yet.
+        """
+        self._conn.execute(
+            "UPDATE clips SET platform=?, platform_id=?, short_url=? WHERE video_id=?",
+            (platform, platform_id, short_url, video_id),
         )
         self._conn.commit()
 
@@ -155,6 +194,11 @@ class MetricsStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def recorded_ids(self) -> set[str]:
+        """Return every ``video_id`` currently recorded in the store."""
+        rows = self._conn.execute("SELECT video_id FROM clips").fetchall()
+        return {r["video_id"] for r in rows}
+
     def stats_channel(self, channel: str) -> dict:
         """Aggregate production/publishing/stats totals for a single channel."""
         row = self._conn.execute(
@@ -184,15 +228,22 @@ class MetricsStore:
         ).fetchall()
         return [r["channel"] for r in rows]
 
-    def _channel_avg_median_views(self, channel: str) -> tuple[float | None, float | None]:
-        """(avg, median) of ``views`` over published clips for *channel*."""
+    def _channel_avg_median_views(self, key: str) -> tuple[float | None, float | None]:
+        """(avg, median) of ``views`` over published clips for the grouped *key*.
+
+        *key* is the aggregated channel key — the source channel when recorded,
+        otherwise the publication profile name (legacy rows) — always matched
+        through the same ``COALESCE`` expression :meth:`channel_performance`
+        groups by.
+        """
         values = [
             r["views"]
             for r in self._conn.execute(
                 "SELECT views FROM clips "
-                "WHERE channel=? AND published=1 AND views IS NOT NULL "
+                "WHERE COALESCE(NULLIF(source_channel,''), channel)=? "
+                "AND published=1 AND views IS NOT NULL "
                 "ORDER BY views",
-                (channel,),
+                (key,),
             ).fetchall()
         ]
         n = len(values)
@@ -209,7 +260,10 @@ class MetricsStore:
     def channel_performance(self, limit: int = 10) -> list[dict]:
         """Aggregate real-world performance per source channel.
 
-        ``produced``/``published``/``with_stats``/``views``/``likes``/
+        Rows are grouped by the **source channel** (``source_channel``);
+        rows recorded before that field existed fall back to the publication
+        profile name (``channel``) via ``COALESCE``, so legacy data is never
+        dropped. ``produced``/``published``/``with_stats``/``views``/``likes``/
         ``comments`` count all rows for the channel (matching
         :meth:`stats_channel`), while ``avg_views`` and ``median_views`` are
         computed strictly over **published** clips with a non-NULL ``views``,
@@ -218,12 +272,14 @@ class MetricsStore:
         capped at *limit*.
         """
         rows = self._conn.execute(
-            "SELECT channel, "
+            "SELECT COALESCE(NULLIF(source_channel,''), channel) AS channel, "
             "COUNT(*) AS produced, "
             "SUM(CASE WHEN published=1 THEN 1 ELSE 0 END) AS published, "
             "SUM(CASE WHEN collected_at IS NOT NULL THEN 1 ELSE 0 END) AS with_stats, "
             "SUM(views) AS views, SUM(likes) AS likes, SUM(comments) AS comments "
-            "FROM clips WHERE channel <> '' GROUP BY channel"
+            "FROM clips "
+            "WHERE COALESCE(NULLIF(source_channel,''), channel) <> '' "
+            "GROUP BY COALESCE(NULLIF(source_channel,''), channel)"
         ).fetchall()
         out: list[dict] = []
         for row in rows:

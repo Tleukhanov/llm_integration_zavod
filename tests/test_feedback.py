@@ -145,6 +145,44 @@ class ChannelPerformanceTests(unittest.TestCase):
             self.assertEqual(row["median_views"], 100.0)
             store.close()
 
+    def test_source_channel_keys_and_feeds_scoring(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.record_clip(ClipRecord(
+                video_id="loop1",
+                source_url="https://youtu.be/loop1",
+                channel="профиль",
+                source_channel="ИмяКаналаYT",
+                published=True,
+            ))
+            store.update_stats("loop1", views=5_000)
+
+            rows = store.channel_performance()
+            self.assertEqual([r["channel"] for r in rows], ["ИмяКаналаYT"])
+            self.assertEqual(rows[0]["avg_views"], 5_000.0)
+
+            perf = {r["channel"]: r["avg_views"] for r in rows}
+            video = make_video("vod_a", channel="ИмяКаналаYT")
+            self.assertGreater(
+                score_vod(video, now=NOW, performance=perf),
+                score_vod(video, now=NOW),
+            )
+            self.assertGreater(feedback_bonus("ИмяКаналаYT", perf), 0.0)
+            # Channels with no recorded clips still get zero bonus.
+            self.assertEqual(feedback_bonus("НетЗаписей", perf), 0.0)
+
+            # Legacy rows without source_channel still group by profile name.
+            store.record_clip(ClipRecord(
+                video_id="legacy1",
+                source_url="https://youtu.be/legacy1",
+                channel="старый_профиль",
+                published=True,
+            ))
+            store.update_stats("legacy1", views=1_000)
+            legacy = {r["channel"]: r for r in store.channel_performance()}
+            self.assertIn("старый_профиль", legacy)
+            store.close()
+
 
 class ScoreVodFeedbackTests(unittest.TestCase):
     def test_strong_channel_gets_full_cap_bonus(self):
@@ -285,6 +323,48 @@ class AutoBatchFeedbackTests(unittest.TestCase):
                 out = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
             self.assertEqual(len(out), 1)
             self.assertEqual(out[0]["score"], round(score_vod(videos[0]), 1))
+
+    def test_auto_discover_excludes_ids_already_recorded_in_metrics(self):
+        videos = [
+            make_video("m1", channel="hit_channel", view_count=50_000),
+            make_video("fresh_x", channel="hit_channel", view_count=50_000),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metrics.sqlite"
+            self._seed_metrics(db_path, "hit_channel", 200_000)  # records m0/m1/m2
+            settings = self._settings(Path(tmp) / "processed.json", metrics_path=db_path)
+            with mock.patch("shorts_clipper.scout.auto_batch.scout", return_value=videos):
+                out = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
+            self.assertEqual([item["video_id"] for item in out], ["fresh_x"])
+
+    def test_auto_discover_second_round_does_not_repeat_clipped(self):
+        videos = [
+            make_video("only_once", channel="hit_channel", view_count=50_000),
+            make_video("later_vod", channel="hit_channel", view_count=50_000),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metrics.sqlite"
+            settings = self._settings(Path(tmp) / "processed.json", metrics_path=db_path)
+            with mock.patch("shorts_clipper.scout.auto_batch.scout", return_value=videos):
+                first = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
+            self.assertEqual(len(first), 2)
+
+            for item in first:
+                store = MetricsStore(db_path)
+                try:
+                    store.record_clip(ClipRecord(
+                        video_id=item["video_id"],
+                        source_url=item["url"],
+                        channel="профиль",
+                        source_channel="hit_channel",
+                        published=False,
+                    ))
+                finally:
+                    store.close()
+
+            with mock.patch("shorts_clipper.scout.auto_batch.scout", return_value=videos):
+                second = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
+            self.assertEqual(second, [])
 
 
 if __name__ == "__main__":

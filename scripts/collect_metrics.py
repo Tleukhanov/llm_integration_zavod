@@ -1,8 +1,8 @@
 """Collect view/like/comment stats for produced clips into the metrics DB.
 
-For every clip row still awaiting stats (or stale), queries the source
-video via yt-dlp and writes the numbers back with
-``MetricsStore.update_stats``.
+For every clip row still awaiting stats (or stale), queries the published
+Short whenever one is known (``short_url``) and otherwise the source video,
+then writes the numbers back with ``MetricsStore.update_stats``.
 
 Usage::
 
@@ -18,6 +18,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _stats_url(row: dict) -> str:
+    """Pick the URL whose stats reflect the *published* Shorts clip.
+
+    Prefers a non-empty HTTP(S) ``short_url`` (the clip that actually went
+    live); falls back to ``source_url`` for clips never published, so their
+    source-VOD numbers are still collected instead of being skipped.
+    """
+    short_url = (row.get("short_url") or "").strip()
+    if short_url.startswith(("http://", "https://")):
+        return short_url
+    return row.get("source_url") or ""
 
 
 def _build_parser(metrics_path: str) -> argparse.ArgumentParser:
@@ -45,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rows = store.unpublished(min_age_seconds=args.min_age_min * 60)
         for row in rows[: args.limit]:
-            url = row.get("source_url") or ""
+            url = _stats_url(row)
             if not url.startswith(("http://", "https://")):
                 continue
             stats = fetch_video_stats(url)

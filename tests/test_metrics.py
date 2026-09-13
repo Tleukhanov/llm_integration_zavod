@@ -34,6 +34,21 @@ def _blank_env():
     return patch.dict(os.environ, {}, clear=True)
 
 
+def _load_collect_metrics_module():
+    """Load ``scripts/collect_metrics.py`` as a module (import-safe)."""
+    import importlib.util
+
+    repo_root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "collect_metrics",
+        repo_root / "scripts" / "collect_metrics.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
 class MetricsStoreTests(unittest.TestCase):
     def _store(self, temp_dir: str) -> MetricsStore:
         return MetricsStore(Path(temp_dir) / "metrics.sqlite")
@@ -99,6 +114,46 @@ class MetricsStoreTests(unittest.TestCase):
                 "SELECT * FROM clips WHERE video_id=?", ("p1",)
             ).fetchone()
             self.assertEqual(row["publish_ts"], _today_iso(12))
+            store.close()
+
+    def test_record_publish_updates_metadata_idempotently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.record_clip(ClipRecord(video_id="pub1", source_url="https://youtu.be/pub1"))
+
+            store.record_publish(
+                "pub1",
+                "youtube",
+                platform_id="vid123",
+                short_url="https://youtube.com/shorts/vid123",
+            )
+            row = store._conn.execute(
+                "SELECT * FROM clips WHERE video_id=?", ("pub1",)
+            ).fetchone()
+            self.assertEqual(row["platform"], "youtube")
+            self.assertEqual(row["platform_id"], "vid123")
+            self.assertEqual(row["short_url"], "https://youtube.com/shorts/vid123")
+
+            # Re-calling is idempotent: overwrites with the same shape, no error.
+            store.record_publish(
+                "pub1", "youtube", platform_id="vid999", short_url=None
+            )
+            row = store._conn.execute(
+                "SELECT * FROM clips WHERE video_id=?", ("pub1",)
+            ).fetchone()
+            self.assertEqual(row["platform_id"], "vid999")
+            self.assertIsNone(row["short_url"])
+
+            # Unknown video_id is a silent no-op (no exception, no row).
+            store.record_publish("missing", "youtube", platform_id="x")
+            store.close()
+
+    def test_recorded_ids_returns_every_video_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            for vid in ("v1", "v2", "v3"):
+                store.record_clip(ClipRecord(video_id=vid, source_url=f"https://youtu.be/{vid}"))
+            self.assertEqual(store.recorded_ids(), {"v1", "v2", "v3"})
             store.close()
 
     def test_update_stats_coalesces(self):
@@ -381,6 +436,79 @@ class GeminiTitleCandidatesTests(unittest.TestCase):
 
         self.assertEqual(meta["candidates"], [])
         self.assertEqual(meta["title"], "Only title")
+
+
+class CollectMetricsUrlTests(unittest.TestCase):
+    def test_short_url_preferred_over_source_url(self):
+        mod = _load_collect_metrics_module()
+        row = {
+            "source_url": "https://www.youtube.com/watch?v=SOURCE_ID",
+            "short_url": "https://youtube.com/shorts/PUBLISHED_ID",
+        }
+        self.assertEqual(mod._stats_url(row), "https://youtube.com/shorts/PUBLISHED_ID")
+
+    def test_non_http_short_url_ignored(self):
+        mod = _load_collect_metrics_module()
+        row = {
+            "source_url": "https://youtu.be/SOURCE_ID",
+            "short_url": "youtube.com/shorts/abc",
+        }
+        self.assertEqual(mod._stats_url(row), "https://youtu.be/SOURCE_ID")
+
+    def test_unpublished_falls_back_to_source_url(self):
+        mod = _load_collect_metrics_module()
+        row = {"source_url": "https://youtu.be/SOURCE_ID", "short_url": ""}
+        self.assertEqual(mod._stats_url(row), "https://youtu.be/SOURCE_ID")
+
+
+class RunnerMarkProcessedTests(unittest.TestCase):
+    def test_mark_processed_runs_when_flag_disabled(self):
+        from dataclasses import replace
+
+        from shorts_clipper.core.models import ClipWindow, TranscriptSegment
+        from shorts_clipper.core.settings import Settings
+        from shorts_clipper.pipeline.runner import run
+
+        settings = replace(
+            Settings.from_env(),
+            processed_check_enabled=False,
+            bgm_mode="off",
+            stream_audio_energy_enabled=False,
+        )
+        segments = [TranscriptSegment(start=0.0, end=10.0, text="Text", words=[])]
+        preselected = [(ClipWindow(start=10.0, end=20.0), "center")]
+
+        with patch("shorts_clipper.pipeline.runner.fetch_subtitles", return_value=segments), \
+             patch("shorts_clipper.pipeline.runner.download_audio"), \
+             patch("shorts_clipper.pipeline.runner.transcribe_clip", return_value=segments), \
+             patch("shorts_clipper.pipeline.runner.download_clip"), \
+             patch("shorts_clipper.pipeline.runner.process_to_vertical"), \
+             patch("shorts_clipper.pipeline.runner.burn_subtitles"), \
+             patch("shorts_clipper.rendering.thumbnailer.extract_thumbnail"), \
+             patch("shorts_clipper.pipeline.runner.GeminiProvider") as mock_gem, \
+             patch("shorts_clipper.pipeline.runner.EditorialFinisher") as mock_finisher, \
+             patch("shorts_clipper.core.processed_store.ProcessedStore") as mock_store:
+            mock_gem.return_value.generate_clip_metadata.return_value = {
+                "title": "Title",
+                "description": "Description",
+                "tags": ["cs2"],
+            }
+            mock_finisher.return_value.snap_boundaries.side_effect = (
+                lambda start, end, *args, **kwargs: ClipWindow(start=start, end=end)
+            )
+
+            result = run(
+                "https://www.youtube.com/watch?v=dummy123",
+                settings=settings,
+                count=1,
+                upload=False,
+                preselected_clips=preselected,
+            )
+
+        self.assertIsInstance(result, Path)
+        self.assertNotEqual(result, [])
+        mock_store.from_path.assert_called_once()
+        mock_store.from_path.return_value.mark_processed.assert_called_once()
 
 
 if __name__ == "__main__":

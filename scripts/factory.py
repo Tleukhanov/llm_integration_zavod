@@ -112,6 +112,7 @@ def _record_produced_clip(
         hook=hook,
         affiliate_id=os.environ.get("AFFILIATE_PARTNER_ID") or "",
         channel=channel,
+        source_channel=video.get("channel", ""),
         published=published,
         publish_ts=datetime.now(UTC).isoformat(),
         rendered_path=str(output_path),

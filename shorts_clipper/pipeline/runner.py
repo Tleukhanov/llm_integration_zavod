@@ -1079,7 +1079,7 @@ def run(
     run_ctx.export_all()
     run_ctx.verify_run()
 
-    if output_paths and settings.processed_check_enabled:
+    if output_paths:
         try:
             from shorts_clipper.core.processed_store import ProcessedStore, extract_video_id
 

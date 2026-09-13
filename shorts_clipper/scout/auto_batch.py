@@ -45,6 +45,34 @@ def _load_performance_map(metrics_db: str | Path | None, settings: Any) -> dict 
     return {row["channel"]: row["avg_views"] for row in rows if row["avg_views"]}
 
 
+def _load_recorded_ids(metrics_db: str | Path | None, settings: Any) -> set[str]:
+    """Load every already-recorded ``video_id`` from the metrics store, best-effort.
+
+    Uses *metrics_db* when given, otherwise falls back to ``settings.metrics_path``.
+    Returns an empty set when no path is configured, the file is missing, or
+    reading it fails, so discovery degrades gracefully instead of crashing.
+    """
+    db_path: str | Path | None = metrics_db
+    if db_path is None:
+        db_path = getattr(settings, "metrics_path", None)
+    if not db_path:
+        return set()
+    path = Path(db_path)
+    if not path.exists():
+        return set()
+    try:
+        from shorts_clipper.core.metrics import MetricsStore
+
+        store = MetricsStore(path)
+        try:
+            return store.recorded_ids()
+        finally:
+            store.close()
+    except Exception:
+        log.warning("Could not load recorded clip ids from %s", path, exc_info=True)
+        return set()
+
+
 def auto_discover(
     settings: Any,
     query: str = "cs2 gameplay",
@@ -72,8 +100,9 @@ def auto_discover(
         metrics_db: Optional path to the clip metrics sqlite. When provided
             (or when ``settings.metrics_path`` points at an existing file) the
             channel performance feedback map is loaded once and threaded into
-            ranking, so proven source channels get a score bonus. A missing or
-            unreadable DB is ignored gracefully.
+            ranking, so proven source channels get a score bonus, and any
+            already-recorded ``video_id`` (from a previous clip round) is added
+            to the de-dup set. A missing or unreadable DB is ignored gracefully.
 
     Returns:
         List of dicts with keys ``url``, ``video_id``, ``title``, ``platform``,
@@ -84,9 +113,10 @@ def auto_discover(
     try:
         store = ProcessedStore.from_path(settings.processed_videos_path)
         processed_ids = store.all_ids()
+        recorded_ids = _load_recorded_ids(metrics_db, settings)
 
         candidates: list[tuple[str, SourceVideo]] = []
-        seen: set[str] = set(processed_ids)
+        seen: set[str] = set(processed_ids) | recorded_ids
         for name in providers:
             remaining = max_results - len(candidates)
             if remaining <= 0:
