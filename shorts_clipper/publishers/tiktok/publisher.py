@@ -191,7 +191,6 @@ class TikTokPublisher(Publisher):
                 progress_callback(100)
 
             video_id = (status_res.get("data") or {}).get("video_id") or publish_id
-            platform_id = video_id
             open_id = self.settings.tiktok_open_id
             url = (
                 f"https://www.tiktok.com/@{open_id}/video/{video_id}"
@@ -203,7 +202,7 @@ class TikTokPublisher(Publisher):
                 platform=self.platform_name,
                 success=True,
                 url=url,
-                platform_id=platform_id,
+                platform_id=publish_id,
                 published_at=datetime.now(UTC).isoformat() + "Z",
             )
 

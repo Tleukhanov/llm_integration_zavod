@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..base import Publisher
-from ..models import ClipMetadata, PublishResult
+from ..models import ClipMetadata, PublishResult, PublishValidationError
 from .auth import get_youtube_service
 from .uploader import upload_short
 
@@ -30,6 +30,8 @@ class YouTubePublisher(Publisher):
         signed_url: str | None = None,
         progress_callback: Callable[[int], None] | None = None,
     ) -> PublishResult:
+        from ..manager import _is_retriable_error
+
         try:
             video_id = upload_short(
                 video_path=video_path,
@@ -46,7 +48,17 @@ class YouTubePublisher(Publisher):
                 platform_id=video_id,
                 published_at=datetime.utcnow().isoformat() + "Z",
             )
+        except PublishValidationError as e:
+            log.error(f"YouTube publishing failed: {e}")
+            return PublishResult(
+                platform=self.platform_name,
+                success=False,
+                error_message=str(e),
+            )
         except Exception as e:
+            if _is_retriable_error(e):
+                log.warning(f"YouTube transient error, retrying later: {e}")
+                raise
             log.error(f"YouTube publishing failed: {e}")
             return PublishResult(
                 platform=self.platform_name,

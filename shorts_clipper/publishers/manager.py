@@ -392,6 +392,24 @@ class PublishingEngine:
                             )
                             self._record_publish(platform_name, result)
                             break
+                        else:
+                            log.error(
+                                f"❌ Idempotency check: id {known_platform_id} for "
+                                f"{platform_name} returned verify=False; possible "
+                                f"duplicate — skipping re-upload."
+                            )
+                            result = PublishResult(
+                                platform=platform_name,
+                                success=False,
+                                retry_count=attempt - 1,
+                                platform_id=known_platform_id,
+                                error_message=(
+                                    "Possible duplicate upload: id "
+                                    f"{known_platform_id} was not verified "
+                                    "(verify returned False); re-upload skipped"
+                                ),
+                            )
+                            break
                     except Exception as ve:
                         log.warning(
                             f"⚠️ Idempotency verify failed for {platform_name} "
@@ -484,6 +502,7 @@ class PublishingEngine:
                     )
                 except Exception as e:
                     if _is_retriable_error(e):
+                        known_platform_id = _extract_platform_id(e, known_platform_id)
                         retry_after = _retry_after_seconds(e)
                         if retry_after is not None:
                             wait_override = retry_after

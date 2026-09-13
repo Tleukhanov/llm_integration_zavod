@@ -1,8 +1,15 @@
 import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import requests
 
+from shorts_clipper.core.settings import Settings
 from shorts_clipper.publishers import (
     ClipMetadata,
     PublisherRegistry,
@@ -654,3 +661,264 @@ def test_explicit_failure_is_not_retried(tmp_path):
     assert pub.calls == 1
     assert results["perm_fail"].success is False
     assert results["perm_fail"].error_message
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# unittest-discoverable coverage (also runs in the `python -m unittest` harness)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _EngineTestCaseBase(unittest.TestCase):
+    """Self-contained engine scaffold (works under pytest AND plain unittest)."""
+
+    def setUp(self):
+        self._orig_publishers = dict(PublisherRegistry._publishers)
+        PublisherRegistry._publishers.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.video_path = Path(self._tmp.name) / "test_clip.mp4"
+        self.video_path.touch()
+        self._r2 = patch("shorts_clipper.publishers.manager.R2Storage")
+        r2 = self._r2.start()
+        self.addCleanup(self._r2.stop)
+        r2.return_value.upload.return_value = "mock_key"
+        r2.return_value.generate_signed_url.return_value = "http://mock_signed_url"
+        self._metrics = patch.dict(
+            os.environ,
+            {"SHORTS_METRICS_PATH": str(Path(self._tmp.name) / "metrics.sqlite")},
+        )
+        self._metrics.start()
+        self.addCleanup(self._metrics.stop)
+
+    def tearDown(self):
+        PublisherRegistry._publishers = self._orig_publishers
+
+
+class W21VerifyFalseStopsReuploadTest(_EngineTestCaseBase):
+    """W2-1: verify()==False in the idempotency guard must NOT re-upload."""
+
+    def test_verify_false_prevents_second_publish(self):
+        class VerifyFalsePublisher(Publisher):
+            def __init__(self):
+                self.publish_count = 0
+                self.verify_ids = []
+
+            @property
+            def platform_name(self):
+                return "verify_false"
+
+            def authenticate(self):
+                pass
+
+            def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+                self.publish_count += 1
+                return PublishResult(self.platform_name, True, "http://v", "vid123")
+
+            def verify(self, platform_id: str) -> bool:
+                self.verify_ids.append(platform_id)
+                return False
+
+        pub = VerifyFalsePublisher()
+        PublisherRegistry._publishers["verify_false"] = lambda: pub
+
+        engine = PublishingEngine(max_retries=3, base_backoff=0)
+        results = engine.publish(self.video_path, ClipMetadata("T", "D"), ["verify_false"])
+
+        # First attempt published + post-verify failed. The idempotency guard on
+        # the 2nd attempt returned False -> must NOT fall through to a re-upload.
+        assert pub.publish_count == 1
+        assert results["verify_false"].success is False
+        assert "re-upload skipped" in results["verify_false"].error_message.lower()
+
+
+class W24YouTubeTransientReraiseTest(unittest.TestCase):
+    """W2-4: transient YT errors must be re-raised, only validation is permanent."""
+
+    def _make_video(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "x.mp4"
+        path.touch()
+        return path
+
+    def test_http_429_is_raised_not_returned(self):
+        from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+        with patch(
+            "shorts_clipper.publishers.youtube.publisher.upload_short",
+            side_effect=FakeGoogleHttpError(429, {"error": {"message": "quota exceeded"}}),
+        ):
+            with self.assertRaises(FakeGoogleHttpError):
+                YouTubePublisher().publish(self._make_video(), ClipMetadata("T", "D"))
+
+    def test_http_500_is_raised_not_returned(self):
+        from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+        with patch(
+            "shorts_clipper.publishers.youtube.publisher.upload_short",
+            side_effect=FakeGoogleHttpError(503, {"error": {"message": "backend"}}),
+        ):
+            with self.assertRaises(FakeGoogleHttpError):
+                YouTubePublisher().publish(self._make_video(), ClipMetadata("T", "D"))
+
+    def test_validation_error_returns_permanent_result(self):
+        from shorts_clipper.publishers.models import PublishValidationError
+        from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+        with patch(
+            "shorts_clipper.publishers.youtube.publisher.upload_short",
+            side_effect=PublishValidationError("insert returned no valid id"),
+        ):
+            res = YouTubePublisher().publish(self._make_video(), ClipMetadata("T", "D"))
+
+        assert res.success is False
+        assert res.platform_id is None
+        assert "no valid id" in res.error_message
+
+    def test_request_exception_is_raised_not_returned(self):
+        from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+        err = requests.exceptions.ConnectionError("timed out")
+        with patch(
+            "shorts_clipper.publishers.youtube.publisher.upload_short",
+            side_effect=err,
+        ):
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                YouTubePublisher().publish(self._make_video(), ClipMetadata("T", "D"))
+
+
+class W24YouTubeRetryCycleTest(_EngineTestCaseBase):
+    """W2-4: transient YT-style errors burn the retry budget in the manager."""
+
+    def test_transient_429_exhausts_budget_and_returns_retriable_failure(self):
+        class Yt429Publisher(Publisher):
+            def __init__(self):
+                self.calls = 0
+
+            @property
+            def platform_name(self):
+                return "yt429"
+
+            def authenticate(self):
+                pass
+
+            def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+                self.calls += 1
+                raise FakeGoogleHttpError(429, {"error": {"message": "quota exceeded"}})
+
+            def verify(self, platform_id: str) -> bool:
+                return True
+
+        pub = Yt429Publisher()
+        PublisherRegistry._publishers["yt429"] = lambda: pub
+
+        engine = PublishingEngine(max_retries=3, base_backoff=0, total_retry_time=30.0)
+        results = engine.publish(self.video_path, ClipMetadata("T", "D"), ["yt429"])
+
+        assert pub.calls == 3
+        assert results["yt429"].success is False
+        assert results["yt429"].error_message
+
+    def test_transient_429_then_success(self):
+        class Yt429ThenSuccess(Publisher):
+            def __init__(self):
+                self.calls = 0
+
+            @property
+            def platform_name(self):
+                return "yt429s"
+
+            def authenticate(self):
+                pass
+
+            def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+                self.calls += 1
+                if self.calls == 1:
+                    raise FakeGoogleHttpError(429, {"error": {"message": "quota exceeded"}})
+                return PublishResult(self.platform_name, True, "http://yt", "yt12345")
+
+            def verify(self, platform_id: str) -> bool:
+                return True
+
+        pub = Yt429ThenSuccess()
+        PublisherRegistry._publishers["yt429s"] = lambda: pub
+
+        engine = PublishingEngine(max_retries=3, base_backoff=0, total_retry_time=30.0)
+        results = engine.publish(self.video_path, ClipMetadata("T", "D"), ["yt429s"])
+
+        assert pub.calls == 2
+        assert results["yt429s"].success is True
+        assert results["yt429s"].retry_count == 1
+
+
+class W26TikTokVerifyIdTest(unittest.TestCase):
+    """W2-6: yt verify() must check with publish_id (what publish() returned)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _setup_publisher(self, status_by_publish_id):
+        from shorts_clipper.publishers.tiktok import publisher as tiktok_mod
+
+        settings = SimpleNamespace(
+            tiktok_client_key="k",
+            tiktok_client_secret="s",
+            tiktok_access_token="tok",
+            tiktok_open_id="open.1",
+        )
+        settings_patcher = patch.object(Settings, "from_env", return_value=settings)
+        settings_patcher.start()
+        self.addCleanup(settings_patcher.stop)
+
+        def fake_request_json(method, url, headers, payload=None, timeout=60):
+            if method == "POST":
+                return {"data": {"publish_id": "pub_123"}}
+            url = str(url)
+            for pid, body in status_by_publish_id.items():
+                if f"publish_id={pid}" in url:
+                    return body
+            return {"data": {"status": "UNKNOWN"}}
+
+        req_patcher = patch.object(tiktok_mod, "_request_json", side_effect=fake_request_json)
+        req_patcher.start()
+        self.addCleanup(req_patcher.stop)
+        return tiktok_mod
+
+    def test_publish_returns_publish_id_as_platform_id(self):
+        tiktok_mod = self._setup_publisher(
+            {
+                "pub_123": {
+                    "data": {"status": "PUBLISH_COMPLETE", "video_id": "vid_999"}
+                }
+            }
+        )
+        video = Path(self._tmp.name) / "x.mp4"
+        res = tiktok_mod.TikTokPublisher().publish(
+            video, ClipMetadata("T", "D"), signed_url="http://signed/url"
+        )
+
+        assert res.success is True
+        assert res.platform_id == "pub_123"
+        assert res.url.endswith("/video/vid_999")
+
+    def test_verify_correct_publish_id_returns_true(self):
+        tiktok_mod = self._setup_publisher(
+            {
+                "pub_123": {
+                    "data": {"status": "PUBLISH_COMPLETE", "video_id": "vid_999"}
+                }
+            }
+        )
+        assert tiktok_mod.TikTokPublisher().verify("pub_123") is True
+
+    def test_verify_unknown_id_returns_false(self):
+        tiktok_mod = self._setup_publisher(
+            {
+                "pub_123": {
+                    "data": {"status": "PUBLISH_COMPLETE", "video_id": "vid_999"}
+                }
+            }
+        )
+        assert tiktok_mod.TikTokPublisher().verify("vid_999") is False
+        assert tiktok_mod.TikTokPublisher().verify("does_not_exist") is False
