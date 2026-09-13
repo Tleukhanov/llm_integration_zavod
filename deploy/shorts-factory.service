@@ -8,8 +8,12 @@ Type=oneshot
 WorkingDirectory=/srv/shorts-clipper
 EnvironmentFile=/srv/shorts-clipper/.env
 ExecStart=/srv/shorts-clipper/.venv/bin/python scripts/multi_channel.py --channels ${SHORTS_CHANNEL}
-Restart=on-failure
-RestartSec=60
+
+# No restart: this is a oneshot job (timer-driven schedule; manual re-run via
+# systemctl start shorts-factory.service).  Business failures (network 429,
+# quota, channel errors) intentionally exit 1 so the operator can inspect
+# logs — restarting every 60s would burn API quota in a retry storm.
+Restart=no
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=shorts-factory

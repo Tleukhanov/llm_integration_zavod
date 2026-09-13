@@ -41,8 +41,10 @@ docker run --rm --env-file .env \
 
 Канал по умолчанию: `SHORTS_CHANNEL` из `.env` (подставляется через `--env-file .env`),
 иначе `channel_name` из конфигурации, иначе фолбэк `alpha`. Лишние аргументы CMD
-не нужны — скрипт сам разрешает дефолт. Клипы из `--max-videos`; для одноразового
-запуска можно передать `--limit 1`.
+не нужны — скрипт сам разрешает дефолт. Число VOD-кандидатов на канал задаёт
+`--limit`/`--max-videos`; клипов из одного VOD — до `--count`. Для одноразового
+запуска: `--limit 1` (один VOD), `--limit 0` — dry-run (discovery не запускается,
+ничего не обрабатывается).
 
 > `data/` и `models/` монтируются для персистентности: `processed_videos.json`,
 > `metrics.sqlite` и whisper-модели живут между запусками контейнера.
@@ -108,6 +110,11 @@ systemctl list-timers shorts-factory.timer shorts-metrics.timer
 sudo systemctl disable --now shorts-factory.timer
 sudo systemctl disable --now shorts-metrics.timer
 ```
+
+> `shorts-factory.service` — oneshot без `Restart=`: бизнес-провал (exit 1,
+> например сеть/429/quota) не триггерит ретрай-шторм, а просто падает в логах.
+> Повторить вручную — `systemctl start shorts-factory.service`. Расписание
+> держит таймер.
 
 ---
 
@@ -307,12 +314,16 @@ SHORTS_PROVIDER=gemini
 ```
 
 3. Workflow запускается ежедневно в 06:00 UTC + вручную (`workflow_dispatch`).
-4. Если `FACTORY_ENV` не задан — workflow пропускает запуск с `exit 0`.
+4. Если `FACTORY_ENV` не задан — шаги «Run factory», «Collect metrics» и
+   «Persist factory state» скипаются (job завершается успешно, ничего не
+   молотится и не пишется). Проверка схемы и smoke-тесты при этом проходят.
 5. Входы `workflow_dispatch`:
    - `channels` — каналы через запятую (default `alpha`; синхронные запуски
      используют тот же дефолт);
-   - `limit` — максимум клипов (default `1`; `0` = без лимита). `--limit` —
-     синоним `--max-videos`.
+   - `limit` — лимит VOD-кандидатов на канал (default `1`; `0` = dry-run:
+     discovery не запускается, клипы не делаются). `--limit` — синоним
+     `--max-videos`; клипов из одного VOD — до `--count`. Workflow всегда
+     передаёт `--limit` явно (0 передаётся как 0 и не превращается в дефолт).
 
 ### Состояние между запусками (state-артефакты)
 

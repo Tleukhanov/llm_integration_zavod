@@ -10,7 +10,7 @@ on:
         required: false
         default: "alpha"
       limit:
-        description: "Max clips to produce (0 = no limit)"
+        description: "Max VODs per channel to process (0 = dry-run, nothing discovered or clipped)"
         required: false
         default: "1"
 
@@ -61,21 +61,20 @@ jobs:
         run: python -m pytest tests/ -x -q --tb=short || true
 
       - name: Run factory
+        if: ${{ secrets.FACTORY_ENV != '' }}
         env:
           SHORTS_LOG_LEVEL: INFO
-        run: |
-          LIMIT=""
-          if [ "${{ inputs.limit || '1' }}" != "0" ]; then
-            LIMIT="--limit ${{ inputs.limit || '1' }}"
-          fi
-          python scripts/multi_channel.py --channels "${{ inputs.channels || 'alpha' }}" $LIMIT
+        run: >
+          python scripts/multi_channel.py
+          --channels "${{ inputs.channels || 'alpha' }}"
+          --limit "${{ inputs.limit || '1' }}"
 
       - name: Collect metrics
-        if: always()
+        if: always() && ${{ secrets.FACTORY_ENV != '' }}
         run: python scripts/collect_metrics.py --limit 50
 
       - name: Persist factory state
-        if: always()
+        if: always() && ${{ secrets.FACTORY_ENV != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: factory-state

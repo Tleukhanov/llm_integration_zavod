@@ -71,7 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     from dataclasses import replace
 
     from shorts_clipper.core.settings import Settings
-    from shorts_clipper.publishers.youtube.auth import get_youtube_service
 
     # Resolve default channel only when --channels was not given (or empty,
     # e.g. systemd passes an unset ${SHORTS_CHANNEL} as an empty arg).
