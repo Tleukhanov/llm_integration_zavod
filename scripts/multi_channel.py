@@ -6,6 +6,8 @@ Usage::
 
     python scripts/multi_channel.py --channels alpha,bravo --count 3 --gameplay --bgm always
     python scripts/multi_channel.py --channels alpha --max-videos 0   # dry-run
+    python scripts/multi_channel.py                                  # default channel
+    python scripts/multi_channel.py --limit 1                        # alias of --max-videos
 """
 
 from __future__ import annotations
@@ -24,8 +26,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Run one factory round per channel (sequential).",
     )
-    p.add_argument("--channels", required=True,
-                   help="Comma-separated channel profile names (e.g. 'alpha,bravo').")
+    p.add_argument("--channels", default=None,
+                   help="Comma-separated channel profile names (e.g. 'alpha,bravo'). "
+                        "Defaults to $SHORTS_CHANNEL, then SHORTS_CHANNEL in .env, "
+                        "then 'alpha'.")
     p.add_argument("--query", default="cs2 gameplay",
                    help="Search query for VOD discovery (default: 'cs2 gameplay').")
     p.add_argument("--providers", default="youtube",
@@ -34,6 +38,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Number of clips per video (default: 3).")
     p.add_argument("--max-videos", type=int, default=3, dest="max_videos",
                    help="Max VODs to discover per channel (default: 3). 0 = dry-run.")
+    p.add_argument("--limit", type=int, default=None, dest="limit",
+                   help="Alias for --max-videos; overrides it when set.")
     p.add_argument("--publish", action="store_true",
                    help="Publish each clip with public visibility after rendering.")
     p.add_argument("--gameplay", action="store_true",
@@ -67,10 +73,21 @@ def main(argv: list[str] | None = None) -> int:
     from shorts_clipper.core.settings import Settings
     from shorts_clipper.publishers.youtube.auth import get_youtube_service
 
+    # Resolve default channel only when --channels was not given (or empty,
+    # e.g. systemd passes an unset ${SHORTS_CHANNEL} as an empty arg).
+    channel_csv = (args.channels or "").strip()
+    if not channel_csv:
+        env_channel = os.environ.get("SHORTS_CHANNEL") or Settings.from_env().channel_name
+        channel_csv = env_channel or "alpha"  # hard fallback if no env/config
+        args.channels = channel_csv
+
     channels = [c.strip() for c in args.channels.split(",") if c.strip()]
     if not channels:
         print("No channels provided.")
         return 2
+
+    if args.limit is not None:
+        args.max_videos = args.limit
 
     providers = tuple(p.strip() for p in args.providers.split(",") if p.strip())
 

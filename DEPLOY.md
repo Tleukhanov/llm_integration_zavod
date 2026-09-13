@@ -31,9 +31,21 @@ cp .env.example .env
 # 3. Собрать образ (ARM64 для Oracle Ampere — см. ниже)
 docker build -t shorts-factory .
 
-# 4. Запустить
-docker run --rm --env-file .env -v "$(pwd)/outputs:/app/outputs" shorts-factory
+# 4. Запустить (каналы берутся из SHORTS_CHANNEL в .env; см. ниже)
+docker run --rm --env-file .env \
+  -v "$(pwd)/outputs:/app/outputs" \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/models:/app/models" \
+  shorts-factory
 ```
+
+Канал по умолчанию: `SHORTS_CHANNEL` из `.env` (подставляется через `--env-file .env`),
+иначе `channel_name` из конфигурации, иначе фолбэк `alpha`. Лишние аргументы CMD
+не нужны — скрипт сам разрешает дефолт. Клипы из `--max-videos`; для одноразового
+запуска можно передать `--limit 1`.
+
+> `data/` и `models/` монтируются для персистентности: `processed_videos.json`,
+> `metrics.sqlite` и whisper-модели живут между запусками контейнера.
 
 ### ARM64 (Oracle Always Free Ampere)
 
@@ -72,8 +84,12 @@ sudo bash deploy/install.sh
 - Клонирует репо в `$BASE_DIR` (по умолчанию `/srv/shorts-clipper`).
 - Создаёт `.venv` и ставит зависимости.
 - Копирует `.env.example` → `.env` (если `.env` нет).
-- Устанавливает `shorts-factory.service` + `shorts-factory.timer`.
-- Таймер: ежедневно в 12:00 + 5 мин после загрузки.
+- Устанавливает `shorts-factory.service` + `shorts-factory.timer`,
+  `shorts-metrics.service` + `shorts-metrics.timer`.
+- Таймеры: фабрика ежедневно в 12:00 + 5 мин после загрузки,
+  метрики — ежедневно в 12:30.
+- Фабрика запускается с `--channels ${SHORTS_CHANNEL}` — задай
+  `SHORTS_CHANNEL=alpha` в `.env` (или в конец при первом прогоне).
 
 ### Ручные команды
 
@@ -83,12 +99,14 @@ sudo systemctl start shorts-factory.service
 
 # Логи
 journalctl -u shorts-factory -f
+journalctl -u shorts-metrics -f
 
 # Статус таймера
-systemctl list-timers shorts-factory.timer
+systemctl list-timers shorts-factory.timer shorts-metrics.timer
 
 # Остановить автозапуск
 sudo systemctl disable --now shorts-factory.timer
+sudo systemctl disable --now shorts-metrics.timer
 ```
 
 ---
@@ -290,7 +308,23 @@ SHORTS_PROVIDER=gemini
 
 3. Workflow запускается ежедневно в 06:00 UTC + вручную (`workflow_dispatch`).
 4. Если `FACTORY_ENV` не задан — workflow пропускает запуск с `exit 0`.
-5. По умолчанию `--limit 1` (чтобы не тратить лишнее время). Можно переопределить через UI.
+5. Входы `workflow_dispatch`:
+   - `channels` — каналы через запятую (default `alpha`; синхронные запуски
+     используют тот же дефолт);
+   - `limit` — максимум клипов (default `1`; `0` = без лимита). `--limit` —
+     синоним `--max-videos`.
+
+### Состояние между запусками (state-артефакты)
+
+`data/processed_videos.json`, `data/metrics.sqlite` и `models/` (whisper) лежат
+в `.gitignore`, поэтому на Actions в начале работы скачивается артефакт
+`factory-state` (если есть) в `data/` и `models/`, а после прогона — независимо
+от исхода (в т.ч. при failure) — `collect_metrics.py --limit 50` и загрузка
+артефакта обратно (`retention-days: 7`). Первый запуск без артефакта не падает
+(`continue-on-error`).
+
+Это исключает дубли (processed_videos.json) и повторную закачку whisper-моделей
+на каждый прогон.
 
 ---
 
@@ -303,10 +337,10 @@ python -m compileall shorts_clipper scripts -q
 # 2. Доступность ffmpeg
 ffmpeg -version
 
-# 3. Тестовый прогон (1 клип, без публикации)
-python scripts/multi_channel.py --limit 1
+# 3. Тестовый прогон (1 клип, дефолтный канал, без публикации)
+python scripts/multi_channel.py --channels alpha --limit 1
 
-# 4. Помощь
+# 4. Помощь (см. фолбэки каналов)
 python scripts/multi_channel.py --help
 ```
 
@@ -334,5 +368,5 @@ sqlite3 data/metrics.sqlite "SELECT * FROM clips ORDER BY created_at DESC LIMIT 
 |---|---|
 | **VPS / выделенный сервер** | systemd + venv — всегда работает, свои ресурсы, полный контроль |
 | **Oracle Always Free Ampere** | Docker `--platform linux/arm64` — бесплатно, хватает для 6 клипов/день |
-| **GitHub Actions** | Бесплатный крон-джоб, но лимит 6 часов/запуск, нет GPU, лимиты минут |
-| **Локальная разработка** | Без автопилота: `python scripts/multi_channel.py --limit 1` |
+| **GitHub Actions** | Бесплатный крон-джоб, но лимит 6 часов/запуск, нет GPU, лимиты минут; state переносится артефактом `factory-state` |
+| **Локальная разработка** | Без автопилота: `python scripts/multi_channel.py --channels alpha --limit 1` |

@@ -59,18 +59,24 @@ sed "s|/srv/shorts-clipper|$BASE_DIR|g" \
     "$BASE_DIR/deploy/shorts-factory.service" > /etc/systemd/system/shorts-factory.service
 sed "s|/srv/shorts-clipper|$BASE_DIR|g" \
     "$BASE_DIR/deploy/shorts-factory.timer"   > /etc/systemd/system/shorts-factory.timer
+sed "s|/srv/shorts-clipper|$BASE_DIR|g" \
+    "$BASE_DIR/deploy/shorts-metrics.service" > /etc/systemd/system/shorts-metrics.service
+sed "s|/srv/shorts-clipper|$BASE_DIR|g" \
+    "$BASE_DIR/deploy/shorts-metrics.timer"   > /etc/systemd/system/shorts-metrics.timer
 
 systemctl daemon-reload
 systemctl enable --now shorts-factory.timer
+systemctl enable --now shorts-metrics.timer
 
 echo ""
 echo "=== Shorts Factory installed ==="
 echo "  Repo:          $BASE_DIR"
 echo "  Timer:         shorts-factory.timer (daily at 12:00 + 5 min after boot)"
+echo "  Metrics:       shorts-metrics.timer (daily at 12:30)"
 echo "  Manual run:    systemctl start shorts-factory.service"
 echo "  Logs:          journalctl -u shorts-factory -f"
 echo ""
 echo "  Next steps:"
-echo "    1. Edit $BASE_DIR/.env with your API keys"
+echo "    1. Edit $BASE_DIR/.env with your API keys + SHORTS_CHANNEL=alpha"
 echo "    2. systemctl start shorts-factory.service   (manual first run)"
 echo "    3. journalctl -u shorts-factory -f           (watch output)"

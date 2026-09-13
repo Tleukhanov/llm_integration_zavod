@@ -1,0 +1,19 @@
+[Unit]
+Description=Shorts Metrics — collect view/like/comment stats for produced clips
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/shorts-clipper
+EnvironmentFile=/srv/shorts-clipper/.env
+ExecStart=/srv/shorts-clipper/.venv/bin/python scripts/collect_metrics.py --limit 200
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=shorts-metrics
+
+# Metrics run should finish well under 30 min for a day's worth of clips
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Shorts Metrics trigger
+
+[Timer]
+OnBootSec=10min
+OnCalendar=*-*-* 12:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -70,6 +70,22 @@ shorts-clipper web
 
 You can also run via module: `python -m shorts_clipper <command>`.
 
+## Factory runner (multi-channel)
+
+Autonomous batch runner that rotates one factory round per channel:
+
+```bash
+python scripts/multi_channel.py                          # default channel
+python scripts/multi_channel.py --channels alpha,bravo   # multiple channels
+python scripts/multi_channel.py --channels alpha --limit 1   # 1 clip, no publish
+```
+
+- `--channels` (comma-separated) is optional: defaults to `$SHORTS_CHANNEL`,
+  then `SHORTS_CHANNEL` from `.env`/settings, then `alpha`.
+- `--limit` is an alias for `--max-videos` (max VODs per channel; `0` = dry-run).
+- Deployment automation (systemd timers, Docker, GitHub Actions cron + state
+  artifacts) is documented in [`DEPLOY.md`](DEPLOY.md).
+
 ## CLI Reference
 
 ```

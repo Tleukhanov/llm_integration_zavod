@@ -18,5 +18,6 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Entrypoint — override via docker run or compose if needed
+# Entrypoint — no args: channel defaults from SHORTS_CHANNEL (env / .env),
+# clip count via --env-file at runtime (e.g. docker run --env-file .env ...).
 CMD ["python", "scripts/multi_channel.py"]
