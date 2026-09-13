@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import requests
 
 from shorts_clipper.publishers import (
     ClipMetadata,
@@ -97,6 +98,13 @@ def mock_r2():
         instance.upload.return_value = "mock_key"
         instance.generate_signed_url.return_value = "http://mock_signed_url"
         yield mock
+
+
+@pytest.fixture(autouse=True)
+def temp_metrics_path(tmp_path, monkeypatch):
+    """Point the defensive metrics hook at a throwaway DB during tests."""
+    monkeypatch.setenv("SHORTS_METRICS_PATH", str(tmp_path / "metrics.sqlite"))
+    yield
 
 
 def test_publisher_registry():
@@ -251,3 +259,398 @@ def test_adding_new_publisher_without_modifying_pipeline(tmp_path):
     results = engine.publish(video_path, meta, ["tiktok"])
 
     assert results["tiktok"].success is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUB-2: YouTube publish must NOT report success without a valid platform id
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_yt_extract_video_id_validation():
+    from shorts_clipper.publishers.models import PublishValidationError
+    from shorts_clipper.publishers.youtube.uploader import _extract_video_id
+
+    assert _extract_video_id({"id": "aBcDeFgHiJk"}) == "aBcDeFgHiJk"
+    assert _extract_video_id({"id": "abc-123_ABX"}) == "abc-123_ABX"
+
+    with pytest.raises(PublishValidationError):
+        _extract_video_id({})
+    with pytest.raises(PublishValidationError):
+        _extract_video_id({"id": None})
+    with pytest.raises(PublishValidationError):
+        _extract_video_id({"id": "short"})
+    with pytest.raises(PublishValidationError):
+        _extract_video_id({"id": "!!!!!!!!!!!invalid"})
+    # Uploaded but no id came back (even though uploadStatus is present)
+    with pytest.raises(PublishValidationError):
+        _extract_video_id({"status": {"uploadStatus": "processed"}})
+
+
+def test_yt_publisher_fails_when_no_platform_id(tmp_path):
+    from unittest.mock import patch
+
+    from shorts_clipper.publishers.models import PublishValidationError
+    from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+    video_path = tmp_path / "x.mp4"
+    video_path.touch()
+    meta = ClipMetadata(title="T", description="D")
+
+    with patch(
+        "shorts_clipper.publishers.youtube.publisher.upload_short",
+        side_effect=PublishValidationError("insert returned no valid id"),
+    ):
+        res = YouTubePublisher().publish(video_path, meta)
+
+    assert res.success is False
+    assert res.platform_id is None
+    assert res.url is None
+    assert "no valid id" in res.error_message
+
+
+def test_yt_publisher_success_sets_short_url(tmp_path):
+    from unittest.mock import patch
+
+    from shorts_clipper.publishers.youtube.publisher import YouTubePublisher
+
+    video_path = tmp_path / "x.mp4"
+    video_path.touch()
+    meta = ClipMetadata(title="T", description="D")
+    video_id = "AbC-1_2xYz9"  # valid 11 chars
+
+    with patch(
+        "shorts_clipper.publishers.youtube.publisher.upload_short",
+        return_value=video_id,
+    ):
+        res = YouTubePublisher().publish(video_path, meta)
+
+    assert res.success is True
+    assert res.platform_id == video_id
+    assert res.url == f"https://youtube.com/shorts/{video_id}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUB-1: idempotent retries — never upload twice when the id was recovered
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ThrowAfterUploadPublisher(Publisher):
+    """Upload commits server-side, then the response is lost (RequestException)."""
+
+    def __init__(self):
+        self.publish_count = 0
+        self.verify_calls = []
+        self.known_id = "a" * 11
+
+    @property
+    def platform_name(self) -> str:
+        return "throw_after_upload"
+
+    def authenticate(self) -> None:
+        pass
+
+    def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+        self.publish_count += 1
+        err = requests.exceptions.RequestException("response lost after upload committed")
+        err.platform_id = self.known_id
+        raise err
+
+    def verify(self, platform_id: str) -> bool:
+        self.verify_calls.append(platform_id)
+        return True
+
+
+def test_idempotent_retry_verifies_before_reupload(tmp_path):
+    pub = ThrowAfterUploadPublisher()
+    PublisherRegistry._publishers["throw_after_upload"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0)
+    video_path = tmp_path / "test_idem.mp4"
+    video_path.touch()
+
+    meta = ClipMetadata(title="Test", description="Test desc")
+
+    results = engine.publish(video_path, meta, ["throw_after_upload"])
+
+    # The 2nd attempt must verify the already-uploaded id instead of re-uploading
+    assert pub.publish_count == 1
+    assert results["throw_after_upload"].success is True
+    assert results["throw_after_upload"].platform_id == pub.known_id
+    assert results["throw_after_upload"].retry_count == 1
+    assert pub.verify_calls == [pub.known_id]
+
+
+def test_budget_exhausted_with_unknown_id_no_reupload(tmp_path):
+    """If a known id cannot be verified, stop (do not re-upload / duplicate)."""
+    class UnverifiablePublisher(Publisher):
+        def __init__(self):
+            self.publish_count = 0
+
+        @property
+        def platform_name(self) -> str:
+            return "unverifiable"
+
+        def authenticate(self) -> None:
+            pass
+
+        def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+            self.publish_count += 1
+            err = requests.exceptions.RequestException("lost response")
+            err.platform_id = "b" * 11
+            raise err
+
+        def verify(self, platform_id: str) -> bool:
+            raise RuntimeError("verify endpoint down")
+
+    pub = UnverifiablePublisher()
+    PublisherRegistry._publishers["unverifiable"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0)
+    video_path = tmp_path / "test_never_dup.mp4"
+    video_path.touch()
+
+    meta = ClipMetadata("T", "D")
+    results = engine.publish(video_path, meta, ["unverifiable"])
+
+    assert pub.publish_count == 1
+    assert results["unverifiable"].success is False
+    assert "duplicate" in results["unverifiable"].error_message.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUB-3: HTTP 429/quota/resumable errors must be classified as retryable
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class FakeGoogleHttpError(Exception):
+    """Shape-alike of googleapiclient.errors.HttpError / ResumableUploadError."""
+
+    def __init__(self, status, body, retry_after=None):
+        self.status_code = status
+        body_text = json.dumps(body) if not isinstance(body, str) else body
+        super().__init__(
+            f'<HttpError {status} when requesting <url> returned "Error". '
+            f"Details: {body_text}"
+        )
+
+        class _Resp:
+            def __init__(self, status, data, headers):
+                self.status = status
+                self.data = data
+                self.headers = headers
+
+            def get(self, name, default=None):
+                return self.headers.get(name, default) if name in self.headers else default
+
+        headers = {"retry-after": retry_after} if retry_after else {}
+        self.resp = _Resp(status, body_text.encode("utf-8"), headers)
+
+
+def test_error_classification_retriable_statuses():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    for code in (408, 429, 500, 502, 503, 504):
+        err = FakeGoogleHttpError(code, {"error": {"message": "server error"}})
+        assert _is_retriable_error(err) is True, f"status {code} should be retriable"
+
+
+def test_error_classification_permanent_statuses():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    for code in (400, 401, 403, 404, 409, 422):
+        err = FakeGoogleHttpError(code, {"error": {"message": "bad request"}})
+        assert _is_retriable_error(err) is False, f"status {code} must be permanent"
+
+
+def test_error_classification_quota_errors():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    quota = FakeGoogleHttpError(
+        403,
+        {"error": {"errors": [{"reason": "quotaExceeded"}], "message": "quota exceeded"}},
+    )
+    assert _is_retriable_error(quota) is True
+
+    daily = FakeGoogleHttpError(
+        403, {"error": {"message": "The user has exceeded their dailyLimitExceeded quota"}}
+    )
+    assert _is_retriable_error(daily) is True
+
+    user = FakeGoogleHttpError(
+        403, {"error": {"errors": [{"reason": "userRateLimitExceeded"}]}}
+    )
+    assert _is_retriable_error(user) is True
+
+    exhausted = FakeGoogleHttpError(429, {"error": {"message": "RESOURCE_EXHAUSTED"}})
+    assert _is_retriable_error(exhausted) is True
+
+
+class ResumableUploadError(Exception):
+    pass
+
+
+def test_error_classification_resumable_and_network():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    assert _is_retriable_error(ResumableUploadError("INSERT_FAILED")) is True
+    assert _is_retriable_error(RuntimeError("resumableUploadError during upload")) is True
+    assert _is_retriable_error(RuntimeError("connection reset by peer")) is True
+    assert _is_retriable_error(RuntimeError("timed out waiting for response")) is True
+
+
+def test_retry_after_parsing():
+    from shorts_clipper.publishers.manager import _retry_after_seconds
+
+    err = FakeGoogleHttpError(429, {"error": {"message": "rate limited"}}, retry_after="7")
+    assert _retry_after_seconds(err) == 7
+
+    class _Resp:
+        status = 429
+
+        def get(self, name, default=None):
+            return None
+
+    class _NoHeader(Exception):
+        resp = _Resp()
+
+    assert _retry_after_seconds(_NoHeader()) is None
+
+
+class FlakyHttpPublisher(Publisher):
+    def __init__(self, fail_codes, fail_body=None):
+        self.fail_codes = list(fail_codes)
+        self.fail_body = fail_body or {"error": {"message": "Transient server error"}}
+        self.calls = 0
+
+    @property
+    def platform_name(self) -> str:
+        return "flaky"
+
+    def authenticate(self) -> None:
+        pass
+
+    def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+        self.calls += 1
+        if self.fail_codes:
+            code = self.fail_codes.pop(0)
+            raise FakeGoogleHttpError(code, self.fail_body)
+        return PublishResult(self.platform_name, True, "http://f", "fid123")
+
+    def verify(self, platform_id: str) -> bool:
+        return True
+
+
+def test_http_429_retried_then_success(tmp_path):
+    pub = FlakyHttpPublisher([429])
+    PublisherRegistry._publishers["flaky"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0)
+    video_path = tmp_path / "test_429.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["flaky"])
+
+    assert pub.calls == 2
+    assert results["flaky"].success is True
+    assert results["flaky"].platform_id == "fid123"
+    assert results["flaky"].retry_count == 1
+
+
+def test_quota_403_retried_then_success(tmp_path):
+    pub = FlakyHttpPublisher(
+        [403],
+        fail_body={"error": {"errors": [{"reason": "quotaExceeded"}],
+                            "message": "quota exceeded"}},
+    )
+    PublisherRegistry._publishers["flaky"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=2, base_backoff=0)
+    video_path = tmp_path / "test_quota.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["flaky"])
+
+    assert pub.calls == 2
+    assert results["flaky"].success is True
+
+
+def test_http_400_permanent_no_retry(tmp_path):
+    pub = FlakyHttpPublisher([400, 400, 400])
+    PublisherRegistry._publishers["flaky"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0)
+    video_path = tmp_path / "test_400.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["flaky"])
+
+    assert pub.calls == 1
+    assert results["flaky"].success is False
+    assert results["flaky"].error_message
+
+
+def test_max_attempts_capped(tmp_path):
+    pub = FlakyHttpPublisher([429, 429, 429, 429, 429])
+    PublisherRegistry._publishers["flaky"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=2, base_backoff=0)
+    video_path = tmp_path / "test_cap.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["flaky"])
+
+    assert pub.calls == 2
+    assert results["flaky"].success is False
+
+
+def test_retry_budget_exhausted_marks_permanent(tmp_path):
+    pub = FlakyHttpPublisher([429, 429])
+    PublisherRegistry._publishers["flaky"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0, total_retry_time=0.0)
+    video_path = tmp_path / "test_budget.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["flaky"])
+
+    assert pub.calls == 1
+    assert results["flaky"].success is False
+    assert "budget exhausted" in results["flaky"].error_message.lower()
+
+
+class PermanentFailPublisher(Publisher):
+    """Returns success=False explicitly (e.g. PUB-2) — must be permanent, no retry."""
+
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def platform_name(self) -> str:
+        return "perm_fail"
+
+    def authenticate(self) -> None:
+        pass
+
+    def publish(self, video_path, metadata, signed_url=None, progress_callback=None):
+        self.calls += 1
+        return PublishResult(
+            self.platform_name, False, error_message="no platform id returned"
+        )
+
+    def verify(self, platform_id: str) -> bool:
+        return True
+
+
+def test_explicit_failure_is_not_retried(tmp_path):
+    pub = PermanentFailPublisher()
+    PublisherRegistry._publishers["perm_fail"] = lambda: pub
+
+    engine = PublishingEngine(max_retries=3, base_backoff=0)
+    video_path = tmp_path / "test_perm.mp4"
+    video_path.touch()
+
+    results = engine.publish(video_path, ClipMetadata("T", "D"), ["perm_fail"])
+
+    assert pub.calls == 1
+    assert results["perm_fail"].success is False
+    assert results["perm_fail"].error_message

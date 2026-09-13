@@ -1,6 +1,19 @@
 from dataclasses import dataclass, field
 
 
+class PublishError(Exception):
+    """Base class for publisher-side failures that must NOT be retried."""
+
+
+class PublishValidationError(PublishError):
+    """Raised when a platform accepted an upload but returned no usable identifier.
+
+    The publish is a hard (permanent) failure: without a platform-side id the
+    pipeline cannot verify the clip or track metrics, and retrying may create
+    a duplicate upload.
+    """
+
+
 @dataclass
 class ClipMetadata:
     """Universal metadata object for a clip."""
