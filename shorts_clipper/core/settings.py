@@ -89,7 +89,7 @@ class Settings:
     gameplay_music_forward: bool = True
     clip_min_separation: float = 15.0
     bgm_mode: str = "off"
-    music_dir: Path = Path("D:/shorts_music")
+    music_dir: Path = Path("data/music")
     bgm_volume: float = 0.30
     phonk_min_tracks: int = 2
     phonk_fetch_max_tracks: int = 6
@@ -107,7 +107,7 @@ class Settings:
     compliance_report_dir: Path = Path("outputs/compliance")
     output_aspect: str = "vertical"
     processed_videos_path: str = "data/processed_videos.json"
-    processed_check_enabled: bool = False
+    processed_check_enabled: bool = True
     vo_enabled: bool = False
     vo_voice: str = "en-US-GuyNeural"
     vo_rate: str = "+8%"
@@ -461,6 +461,7 @@ class Settings:
             affiliate_ad_duration_sec=affiliate_ad_duration_sec,
             affiliate_cta_text=affiliate_cta_text,
             subtitle_langs=subtitle_langs,
+            subtitle_style=_env("SHORTS_SUBTITLE_STYLE", file_values, "default") or "default",
             stream_audio_energy_enabled=stream_audio_energy_enabled,
             stream_energy_window_seconds=stream_energy_window_seconds,
             stream_energy_threshold=stream_energy_threshold,
@@ -475,7 +476,7 @@ class Settings:
             clip_min_separation=clip_min_separation,
             bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
             music_dir=Path(
-                _env("SHORTS_MUSIC_DIR", file_values, "D:/shorts_music") or "D:/shorts_music"
+                _env("SHORTS_MUSIC_DIR", file_values, "data/music") or "data/music"
             ),
             bgm_volume=float(
                 _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"

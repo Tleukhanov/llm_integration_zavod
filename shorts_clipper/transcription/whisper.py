@@ -135,6 +135,14 @@ _model_lock = threading.Lock()
 _transcription_semaphore = threading.Semaphore(1)
 
 
+def _normalize_language(lang: str | None) -> str | None:
+    """Map an empty or ``"auto"`` language hint to None (auto-detect)."""
+    lang = (lang or "").strip()
+    if lang in ("", "auto"):
+        return None
+    return lang
+
+
 def get_whisper_model():
     """Load the Whisper model (singleton pattern)."""
     global _global_model
@@ -164,6 +172,7 @@ def get_whisper_model():
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
             cpu_threads=4,
+            download_root=str(settings.models_dir),
         )
         t_end = time.time()
         log.info(f"[WHISPER] model_load_time: {t_end - t_start:.1f}s")
@@ -198,6 +207,7 @@ def transcribe_clip(
     from shorts_clipper.core.settings import Settings
 
     settings = Settings.from_env()
+    lang = _normalize_language(settings.whisper_language)
 
     log.info("[WHISPER] waiting for transcription slot")
     with _transcription_semaphore:
@@ -208,7 +218,7 @@ def transcribe_clip(
             str(video_path),
             beam_size=beam_size,
             word_timestamps=True,
-            language=settings.whisper_language or None,
+            language=lang,
         )
         # Convert generator to list to force execution
         raw_segments = list(raw_segments)
@@ -217,13 +227,13 @@ def transcribe_clip(
     log.info("[WHISPER] transcription complete")
     log.info(f"[WHISPER] inference_time: {t_inference_end - t_inference_start:.1f}s")
 
-    if settings.whisper_language:
-        if info.language != settings.whisper_language:
+    if lang:
+        if info.language != lang:
             log.warning(
                 "⚠️  Whisper detected language '%s' (requested '%s'). "
                 "Transcript may be inaccurate — continuing anyway.",
                 info.language,
-                settings.whisper_language,
+                lang,
             )
     else:
         log.info(

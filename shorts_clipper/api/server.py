@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import subprocess
 import tempfile
@@ -267,6 +268,7 @@ class ClipMetadataUpdate(BaseModel):
 
 class SettingsModel(BaseModel):
     gemini_api_key: str | None = None
+    has_gemini_key: bool = False
     whisper_model: str = "tiny.en"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
@@ -367,6 +369,23 @@ def cancel_active_job(job_id: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_clip_path(clip_name: str, settings: Settings | None = None) -> Path:
+    """Resolve *clip_name* under output_dir, refusing path traversal.
+
+    Returns the absolute path of an existing regular file, or raises
+    HTTPException(400) for an out-of-base path and HTTPException(404)
+    when the file does not exist.
+    """
+    settings = settings or Settings.from_env()
+    base = Path(settings.output_dir).resolve()
+    target = (base / clip_name).resolve()
+    if target != base and base not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid clip path")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return target
+
+
 @app.get("/api/clips")
 def list_clips() -> list[dict[str, Any]]:
     """Scan outputs directory and return generated vertical video clips with sidecar metadata."""
@@ -449,17 +468,15 @@ def list_clips() -> list[dict[str, Any]]:
 @app.delete("/api/clips/{clip_name:path}")
 def delete_clip(clip_name: str) -> dict[str, str]:
     settings = Settings.from_env()
-    path = Path(settings.output_dir) / clip_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Clip not found")
+    path = _resolve_clip_path(clip_name, settings)
     path.unlink()
 
     thumb = path.with_suffix(".jpg")
-    if thumb.exists():
+    if thumb.is_file():
         thumb.unlink()
 
     json_path = path.with_suffix(".json")
-    if json_path.exists():
+    if json_path.is_file():
         try:
             json_path.unlink()
         except Exception:
@@ -472,9 +489,7 @@ def delete_clip(clip_name: str) -> dict[str, str]:
 def update_clip_metadata(clip_name: str, payload: ClipMetadataUpdate) -> dict[str, str]:
     """Update sidecar metadata for a clip."""
     settings = Settings.from_env()
-    path = Path(settings.output_dir) / clip_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Clip not found")
+    path = _resolve_clip_path(clip_name, settings)
 
     json_path = path.with_suffix(".json")
 
@@ -505,9 +520,7 @@ def publish_clip(
     privacy: str = "private",
 ) -> dict[str, str]:
     settings = Settings.from_env()
-    path = Path(settings.output_dir) / clip_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Clip not found")
+    path = _resolve_clip_path(clip_name, settings)
 
     json_path = path.with_suffix(".json")
     import re
@@ -652,9 +665,7 @@ def publish_clip(
 def autogen_clip_title(clip_name: str) -> dict[str, Any]:
     """Transcribe clip (if missing segments) and call Gemini to generate viral titles & hashtags."""
     settings = Settings.from_env()
-    path = Path(settings.output_dir) / clip_name
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Clip not found")
+    path = _resolve_clip_path(clip_name, settings)
 
     json_path = path.with_suffix(".json")
 
@@ -1071,12 +1082,16 @@ def disconnect_youtube() -> dict[str, Any]:
     return {"success": True, "message": "YouTube account was already disconnected."}
 
 
-@app.get("/api/settings", response_model=SettingsModel)
+@app.get(
+    "/api/settings",
+    response_model=SettingsModel,
+    response_model_exclude={"gemini_api_key"},
+)
 def get_settings() -> SettingsModel:
     """Read configuration from environment variables."""
     s = Settings.from_env()
     return SettingsModel(
-        gemini_api_key=s.gemini_api_key,
+        has_gemini_key=bool(s.gemini_api_key),
         whisper_model=s.whisper_model,
         whisper_device=s.whisper_device,
         whisper_compute_type=s.whisper_compute_type,
@@ -1088,23 +1103,80 @@ def get_settings() -> SettingsModel:
     )
 
 
+_SETTINGS_ENV_KEYS = (
+    "GEMINI_API_KEY",
+    "SHORTS_WHISPER_MODEL",
+    "SHORTS_WHISPER_DEVICE",
+    "SHORTS_WHISPER_COMPUTE_TYPE",
+    "SHORTS_VIDEO_CODEC",
+    "SHORTS_VIDEO_PRESET",
+    "SHORTS_SCOUT_MAX_AGE_DAYS",
+    "SHORTS_ENABLE_GPU",
+    "SHORTS_SUBTITLE_STYLE",
+)
+
+
+def _write_env_merged(updates: dict[str, str]) -> None:
+    """Atomically merge *updates* into the .env file, preserving other keys.
+
+    Existing lines whose KEY matches an entry in *updates* are replaced in
+    place (including comments/blank lines elsewhere); keys that are new are
+    appended. The file is replaced atomically via a temp file + os.replace.
+    """
+    env_path = Path(".env")
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    merged: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                merged.append(f"{key}={updates.pop(key)}")
+                continue
+        merged.append(line)
+    for key, value in updates.items():
+        merged.append(f"{key}={value}")
+
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(env_path.parent), prefix=".env.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(merged) + "\n")
+        os.replace(tmp_name, env_path)
+    except Exception:
+        try:
+            os.remove(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 @app.post("/api/settings")
 def save_settings(payload: SettingsModel) -> dict[str, str]:
-    """Write configuration changes to the active .env file."""
-    try:
-        env_lines = []
-        # Construct .env file lines
-        env_lines.append(f"GEMINI_API_KEY={payload.gemini_api_key or ''}")
-        env_lines.append(f"SHORTS_WHISPER_MODEL={payload.whisper_model}")
-        env_lines.append(f"SHORTS_WHISPER_DEVICE={payload.whisper_device}")
-        env_lines.append(f"SHORTS_WHISPER_COMPUTE_TYPE={payload.whisper_compute_type}")
-        env_lines.append(f"SHORTS_VIDEO_CODEC={payload.video_codec}")
-        env_lines.append(f"SHORTS_VIDEO_PRESET={payload.video_preset}")
-        env_lines.append(f"SHORTS_SCOUT_MAX_AGE_DAYS={payload.scout_max_age_days}")
-        env_lines.append(f"SHORTS_ENABLE_GPU={'true' if payload.enable_gpu else 'false'}")
-        env_lines.append(f"SHORTS_SUBTITLE_STYLE={payload.subtitle_style}")
+    """Write configuration changes to the active .env file.
 
-        Path(".env").write_text("\n".join(env_lines), encoding="utf-8")
+    Only the configured settings keys are updated; any unrelated keys in the
+    existing .env (API tokens, platform credentials, etc.) are preserved.
+    GEMINI_API_KEY is only written when the payload carries a non-empty value,
+    otherwise the existing key is left untouched.
+    """
+    try:
+        updates = {key: "" for key in _SETTINGS_ENV_KEYS}
+        updates["SHORTS_WHISPER_MODEL"] = payload.whisper_model
+        updates["SHORTS_WHISPER_DEVICE"] = payload.whisper_device
+        updates["SHORTS_WHISPER_COMPUTE_TYPE"] = payload.whisper_compute_type
+        updates["SHORTS_VIDEO_CODEC"] = payload.video_codec
+        updates["SHORTS_VIDEO_PRESET"] = payload.video_preset
+        updates["SHORTS_SCOUT_MAX_AGE_DAYS"] = str(payload.scout_max_age_days)
+        updates["SHORTS_ENABLE_GPU"] = str(payload.enable_gpu).lower()
+        updates["SHORTS_SUBTITLE_STYLE"] = payload.subtitle_style
+
+        if payload.gemini_api_key:
+            updates["GEMINI_API_KEY"] = payload.gemini_api_key
+        else:
+            updates.pop("GEMINI_API_KEY", None)
+
+        _write_env_merged(updates)
         return {
             "status": "success",
             "message": "Settings saved to .env file successfully.",

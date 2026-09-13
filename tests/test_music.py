@@ -171,7 +171,7 @@ class SettingsBgmTests(unittest.TestCase):
 
         fv = self._load("")
         self.assertEqual(_env("SHORTS_BGM_MODE", fv, "off") or "off", "off")
-        self.assertEqual(_env("SHORTS_MUSIC_DIR", fv, "D:/shorts_music") or "D:/shorts_music", "D:/shorts_music")
+        self.assertEqual(_env("SHORTS_MUSIC_DIR", fv, "data/music") or "data/music", "data/music")
         self.assertEqual(_env("SHORTS_BGM_VOLUME", fv, "0.30") or "0.30", "0.30")
 
     def test_env_parsing(self):
@@ -183,7 +183,7 @@ class SettingsBgmTests(unittest.TestCase):
             "SHORTS_BGM_VOLUME=0.50\n"
         )
         self.assertEqual(_env("SHORTS_BGM_MODE", fv, "off") or "off", "mix50")
-        self.assertEqual(_env("SHORTS_MUSIC_DIR", fv, "D:/shorts_music") or "D:/shorts_music", "D:/tracks")
+        self.assertEqual(_env("SHORTS_MUSIC_DIR", fv, "data/music") or "data/music", "D:/tracks")
         self.assertEqual(_env("SHORTS_BGM_VOLUME", fv, "0.30") or "0.30", "0.50")
 
     def test_constructs_settings_rows(self):
@@ -192,7 +192,7 @@ class SettingsBgmTests(unittest.TestCase):
 
         s = Settings.from_env("nonexistent.env")
         self.assertEqual(s.bgm_mode, "off")
-        self.assertEqual(s.music_dir, Path("D:/shorts_music"))
+        self.assertEqual(s.music_dir, Path("data/music"))
         self.assertEqual(s.bgm_volume, 0.30)
 
 
