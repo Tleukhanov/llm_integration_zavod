@@ -555,8 +555,15 @@ def publish_clip(
 
     def _upload() -> None:
         try:
+            from shorts_clipper.core.processed_store import extract_video_id
             from shorts_clipper.publishers.manager import PublishingEngine
             from shorts_clipper.publishers.models import ClipMetadata
+
+            video_id = meta.get("video_id") or (
+                extract_video_id(meta.get("source_url") or "")
+                if meta.get("source_url")
+                else None
+            )
 
             meta["publish_status"] = "uploading"
             meta["publish_progress"] = 0
@@ -595,7 +602,9 @@ def publish_clip(
                 )
                 return
 
-            results = engine.publish(path, clip_meta, target_platforms)
+            results = engine.publish(
+                path, clip_meta, target_platforms, video_id=video_id
+            )
 
             meta["publish_progress"] = 100
 

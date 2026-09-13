@@ -507,7 +507,7 @@ class Settings:
             )
             or "data/processed_videos.json",
             processed_check_enabled=(
-                _env("SHORTS_PROCESSED_CHECK_ENABLED", file_values, "false") or "false"
+                _env("SHORTS_PROCESSED_CHECK_ENABLED", file_values, "true") or "true"
             ).lower()
             in {"1", "true", "yes", "on"},
             vo_enabled=(

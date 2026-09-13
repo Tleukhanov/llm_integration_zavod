@@ -1,5 +1,7 @@
 """Security & settings-regression tests for the web API (no live HTTP)."""
 
+import asyncio
+import json
 import os
 import tempfile
 import unittest
@@ -178,12 +180,66 @@ class SettingsParsingTests(unittest.TestCase):
         s = self._from_env("SHORTS_WHISPER_MODEL=tiny.en\n")
         self.assertEqual(s.music_dir, Path("data/music"))
 
-    def test_processed_check_dataclass_default_true(self):
+    def test_processed_check_defaults_true(self):
         self.assertTrue(Settings().processed_check_enabled)
-
-    def test_from_env_without_flag_stays_unchanged(self):
         s = self._from_env("SHORTS_WHISPER_MODEL=tiny.en\n")
-        self.assertFalse(s.processed_check_enabled)
+        self.assertTrue(s.processed_check_enabled)
+
+
+class PublishClipThreadsVideoIdTests(unittest.TestCase):
+    """The /api/clips/{name}/publish route must resolve the source video_id
+    from the sidecar metadata and pass it to engine.publish so record_publish
+    can match the metrics row the factory recorded."""
+
+    def _make_clip(self, out: Path, video_id: str) -> Path:
+        clip = out / "rendered_clip_1.mp4"
+        clip.write_bytes(b"clip")
+        meta = {
+            "video_id": video_id,
+            "source_url": f"https://www.youtube.com/watch?v={video_id}",
+            "title": "Title",
+            "description": "Description",
+            "tags": ["cs2"],
+            "publish_status": "idle",
+        }
+        (out / "final_metadata_1.json").write_text(
+            json.dumps(meta), encoding="utf-8"
+        )
+        return clip
+
+    def test_publish_route_passes_video_id_from_sidecar(self):
+        from fastapi import BackgroundTasks
+
+        from shorts_clipper.core.settings import Settings as CoreSettings
+        from shorts_clipper.publishers.models import PublishResult
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "outputs"
+            out.mkdir()
+            clip = self._make_clip(out, "vid42")
+            self.assertTrue(clip.exists())
+
+            settings = CoreSettings(output_dir=str(out), publish_platforms=["youtube"])
+            with mock.patch.object(server.Settings, "from_env", return_value=settings), \
+                 mock.patch("shorts_clipper.publishers.manager.PublishingEngine") as mock_engine:
+                mock_engine.return_value.publish.return_value = {
+                    "youtube": PublishResult(
+                        "youtube",
+                        True,
+                        "https://youtube.com/shorts/vid42",
+                        "vid42",
+                        "2026-01-01T00:00:00Z",
+                    )
+                }
+                tasks = BackgroundTasks()
+                resp = server.publish_clip("rendered_clip_1.mp4", tasks)
+                self.assertEqual(resp["status"], "started")
+                asyncio.run(tasks())
+
+        mock_engine.return_value.publish.assert_called_once()
+        self.assertEqual(
+            mock_engine.return_value.publish.call_args.kwargs["video_id"], "vid42"
+        )
 
 
 class WhisperLanguageTests(unittest.TestCase):

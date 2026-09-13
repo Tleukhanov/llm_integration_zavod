@@ -133,6 +133,9 @@ class MetricsStoreTests(unittest.TestCase):
             self.assertEqual(row["platform"], "youtube")
             self.assertEqual(row["platform_id"], "vid123")
             self.assertEqual(row["short_url"], "https://youtube.com/shorts/vid123")
+            # A confirmed publish marks the row published and stamps a publish_ts.
+            self.assertEqual(row["published"], 1)
+            self.assertIsNotNone(row["publish_ts"])
 
             # Re-calling is idempotent: overwrites with the same shape, no error.
             store.record_publish(
@@ -143,6 +146,7 @@ class MetricsStoreTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(row["platform_id"], "vid999")
             self.assertIsNone(row["short_url"])
+            self.assertEqual(row["published"], 1)
 
             # Unknown video_id is a silent no-op (no exception, no row).
             store.record_publish("missing", "youtube", platform_id="x")
@@ -462,53 +466,203 @@ class CollectMetricsUrlTests(unittest.TestCase):
 
 
 class RunnerMarkProcessedTests(unittest.TestCase):
-    def test_mark_processed_runs_when_flag_disabled(self):
+    """W2-5/W2-2: ``processed_check_enabled`` is the single gate for the
+    processed-mark, and the canonical source ``video_id`` is threaded into
+    ``engine.publish`` so ``record_publish`` lands on the same metrics row
+    ``record_clip`` created."""
+
+    URL = "https://www.youtube.com/watch?v=dummy123"
+
+    def _settings(self, processed_check_enabled: bool):
         from dataclasses import replace
 
-        from shorts_clipper.core.models import ClipWindow, TranscriptSegment
         from shorts_clipper.core.settings import Settings
-        from shorts_clipper.pipeline.runner import run
 
-        settings = replace(
+        return replace(
             Settings.from_env(),
-            processed_check_enabled=False,
+            processed_check_enabled=processed_check_enabled,
             bgm_mode="off",
             stream_audio_energy_enabled=False,
         )
+
+    def _preselected(self):
+        from shorts_clipper.core.models import ClipWindow
+
+        return [(ClipWindow(start=10.0, end=20.0), "center")]
+
+    def _open_mocks(self, *, mock_engine: bool):
+        from contextlib import ExitStack
+
+        from shorts_clipper.core.models import TranscriptSegment
+
         segments = [TranscriptSegment(start=0.0, end=10.0, text="Text", words=[])]
-        preselected = [(ClipWindow(start=10.0, end=20.0), "center")]
+        stack = ExitStack()
+        stack.enter_context(
+            patch("shorts_clipper.pipeline.runner.fetch_subtitles", return_value=segments)
+        )
+        stack.enter_context(patch("shorts_clipper.pipeline.runner.download_audio"))
+        stack.enter_context(
+            patch("shorts_clipper.pipeline.runner.transcribe_clip", return_value=segments)
+        )
+        stack.enter_context(patch("shorts_clipper.pipeline.runner.download_clip"))
+        stack.enter_context(patch("shorts_clipper.pipeline.runner.process_to_vertical"))
+        stack.enter_context(patch("shorts_clipper.pipeline.runner.burn_subtitles"))
+        stack.enter_context(patch("shorts_clipper.rendering.thumbnailer.extract_thumbnail"))
+        gem = stack.enter_context(patch("shorts_clipper.pipeline.runner.GeminiProvider"))
+        finisher = stack.enter_context(
+            patch("shorts_clipper.pipeline.runner.EditorialFinisher")
+        )
+        store = stack.enter_context(
+            patch("shorts_clipper.core.processed_store.ProcessedStore")
+        )
+        engine = (
+            stack.enter_context(patch("shorts_clipper.pipeline.runner.PublishingEngine"))
+            if mock_engine
+            else None
+        )
+        return stack, gem, finisher, store, engine
 
-        with patch("shorts_clipper.pipeline.runner.fetch_subtitles", return_value=segments), \
-             patch("shorts_clipper.pipeline.runner.download_audio"), \
-             patch("shorts_clipper.pipeline.runner.transcribe_clip", return_value=segments), \
-             patch("shorts_clipper.pipeline.runner.download_clip"), \
-             patch("shorts_clipper.pipeline.runner.process_to_vertical"), \
-             patch("shorts_clipper.pipeline.runner.burn_subtitles"), \
-             patch("shorts_clipper.rendering.thumbnailer.extract_thumbnail"), \
-             patch("shorts_clipper.pipeline.runner.GeminiProvider") as mock_gem, \
-             patch("shorts_clipper.pipeline.runner.EditorialFinisher") as mock_finisher, \
-             patch("shorts_clipper.core.processed_store.ProcessedStore") as mock_store:
-            mock_gem.return_value.generate_clip_metadata.return_value = {
-                "title": "Title",
-                "description": "Description",
-                "tags": ["cs2"],
-            }
-            mock_finisher.return_value.snap_boundaries.side_effect = (
-                lambda start, end, *args, **kwargs: ClipWindow(start=start, end=end)
-            )
+    def _seed(self, gem, finisher) -> None:
+        from shorts_clipper.core.models import ClipWindow
 
+        gem.return_value.generate_clip_metadata.return_value = {
+            "title": "Title",
+            "description": "Description",
+            "tags": ["cs2"],
+        }
+        finisher.return_value.snap_boundaries.side_effect = (
+            lambda start, end, *args, **kwargs: ClipWindow(start=start, end=end)
+        )
+
+    def test_mark_processed_skipped_when_flag_disabled(self):
+        from shorts_clipper.pipeline.runner import run
+
+        stack, gem, finisher, store, _ = self._open_mocks(mock_engine=False)
+        with stack:
+            self._seed(gem, finisher)
             result = run(
-                "https://www.youtube.com/watch?v=dummy123",
-                settings=settings,
+                self.URL,
+                settings=self._settings(processed_check_enabled=False),
                 count=1,
                 upload=False,
-                preselected_clips=preselected,
+                preselected_clips=self._preselected(),
             )
 
         self.assertIsInstance(result, Path)
-        self.assertNotEqual(result, [])
-        mock_store.from_path.assert_called_once()
-        mock_store.from_path.return_value.mark_processed.assert_called_once()
+        # Gate disabled: neither the entry check nor the mark touches the store.
+        store.from_path.assert_not_called()
+
+    def test_mark_processed_recorded_when_flag_enabled(self):
+        from shorts_clipper.pipeline.runner import run
+
+        stack, gem, finisher, store, _ = self._open_mocks(mock_engine=False)
+        with stack:
+            self._seed(gem, finisher)
+            store.from_path.return_value.is_processed.return_value = False
+            result = run(
+                self.URL,
+                settings=self._settings(processed_check_enabled=True),
+                count=1,
+                upload=False,
+                preselected_clips=self._preselected(),
+            )
+
+        self.assertIsInstance(result, Path)
+        store.from_path.return_value.mark_processed.assert_called_once_with(
+            "dummy123", self.URL, title=None
+        )
+
+    def test_mark_processed_skipped_on_publish_failure(self):
+        from shorts_clipper.pipeline.runner import run
+
+        stack, gem, finisher, store, engine = self._open_mocks(mock_engine=True)
+        with stack:
+            self._seed(gem, finisher)
+            store.from_path.return_value.is_processed.return_value = False
+            engine.return_value.publish.side_effect = RuntimeError("upload boom")
+            result = run(
+                self.URL,
+                settings=self._settings(processed_check_enabled=True),
+                count=1,
+                upload=True,
+                preselected_clips=self._preselected(),
+            )
+
+        self.assertIsInstance(result, Path)
+        engine.return_value.publish.assert_called_once()
+        self.assertEqual(
+            engine.return_value.publish.call_args.kwargs["video_id"], "dummy123"
+        )
+        # A failed publish prevents the processed-mark so the video can retry.
+        store.from_path.return_value.mark_processed.assert_not_called()
+
+    def test_runner_publish_passes_canonical_video_id(self):
+        from shorts_clipper.pipeline.runner import run
+        from shorts_clipper.publishers.models import PublishResult
+
+        stack, gem, finisher, store, engine = self._open_mocks(mock_engine=True)
+        with stack:
+            self._seed(gem, finisher)
+            store.from_path.return_value.is_processed.return_value = False
+            engine.return_value.publish.return_value = {
+                "youtube": PublishResult(
+                    "youtube",
+                    True,
+                    "https://youtube.com/shorts/dummy123",
+                    "dummy123",
+                    "2026-01-01T00:00:00Z",
+                )
+            }
+            result = run(
+                self.URL,
+                settings=self._settings(processed_check_enabled=True),
+                count=1,
+                upload=True,
+                preselected_clips=self._preselected(),
+            )
+
+        self.assertIsInstance(result, Path)
+        engine.return_value.publish.assert_called_once()
+        video_id = engine.return_value.publish.call_args.kwargs["video_id"]
+        self.assertEqual(video_id, "dummy123")
+        self.assertTrue(video_id)
+
+    def test_record_publish_matches_row_inserted_by_record_clip(self):
+        from shorts_clipper.core.settings import Settings as CoreSettings
+        from shorts_clipper.publishers import manager as mgr
+        from shorts_clipper.publishers.models import PublishResult
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metrics.sqlite"
+            store = MetricsStore(db_path)
+            store.record_clip(ClipRecord(video_id="dummy123", source_url=self.URL))
+            store.close()
+
+            engine = mgr.PublishingEngine()
+            engine._video_id = "dummy123"
+            result = PublishResult(
+                "youtube",
+                True,
+                "https://youtube.com/shorts/dummy123",
+                "dummy123",
+                "2026-01-01T00:00:00Z",
+            )
+            with patch.object(
+                mgr.Settings, "from_env", return_value=CoreSettings(metrics_path=db_path)
+            ):
+                engine._record_publish("youtube", result)
+
+            reader = MetricsStore(db_path)
+            try:
+                row = reader._conn.execute(
+                    "SELECT * FROM clips WHERE video_id=?", ("dummy123",)
+                ).fetchone()
+            finally:
+                reader.close()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["platform_id"], "dummy123")
+            self.assertEqual(row["short_url"], "https://youtube.com/shorts/dummy123")
+            self.assertEqual(row["published"], 1)
 
 
 if __name__ == "__main__":

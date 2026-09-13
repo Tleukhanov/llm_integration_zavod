@@ -283,6 +283,9 @@ class AutoBatchFeedbackTests(unittest.TestCase):
             self.assertEqual([item["video_id"] for item in out], ["b_vod", "a_vod"])
             self.assertGreater(out[0]["score"], out[1]["score"])
             self.assertEqual(out[0]["score"], round(score_vod(videos[0], performance={"hit_channel": 200_000.0}), 1))
+            # The provider's source channel is exposed for the metrics record.
+            self.assertEqual(out[0]["channel"], "hit_channel")
+            self.assertEqual(out[1]["channel"], "unknown_channel")
 
     def test_auto_discover_scores_tie_without_performance(self):
         videos = [
@@ -336,6 +339,20 @@ class AutoBatchFeedbackTests(unittest.TestCase):
             with mock.patch("shorts_clipper.scout.auto_batch.scout", return_value=videos):
                 out = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
             self.assertEqual([item["video_id"] for item in out], ["fresh_x"])
+
+    def test_auto_discover_exposes_source_channel(self):
+        videos = [
+            make_video("c_vod", channel="ИмяКаналаYT"),
+            make_video("u_vod"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = self._settings(Path(tmp) / "processed.json")
+            with mock.patch("shorts_clipper.scout.auto_batch.scout", return_value=videos):
+                out = auto_discover(settings, query="cs2", providers=("youtube",), max_results=10)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["channel"], "ИмяКаналаYT")
+        # Provider without a channel name yields an empty string, never None.
+        self.assertEqual(out[1]["channel"], "")
 
     def test_auto_discover_second_round_does_not_repeat_clipped(self):
         videos = [

@@ -141,11 +141,15 @@ class MetricsStore:
 
         Stores which platform the clip went live on, the platform-side id and
         the public short URL, so stats collection can target the published clip
-        itself. Silently does nothing when *video_id* is not recorded yet.
+        itself. Also confirms the row as published (``published=1``) and stamps
+        an initial ``publish_ts`` when the row does not carry one yet, so
+        ``channel_performance`` / ``should_publish_today`` count it. Silently
+        does nothing when *video_id* is not recorded yet.
         """
         self._conn.execute(
-            "UPDATE clips SET platform=?, platform_id=?, short_url=? WHERE video_id=?",
-            (platform, platform_id, short_url, video_id),
+            "UPDATE clips SET platform=?, platform_id=?, short_url=?, "
+            "published=1, publish_ts=COALESCE(publish_ts, ?) WHERE video_id=?",
+            (platform, platform_id, short_url, _now_iso(), video_id),
         )
         self._conn.commit()
 

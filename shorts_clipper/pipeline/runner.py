@@ -103,14 +103,19 @@ def run(
     configure_logging(settings.log_level)
     log.info("🚀 PIPELINE START: %s (extracting %d clip(s))", url, count)
 
+    from shorts_clipper.core.processed_store import extract_video_id
+
+    # Canonical source-video id, shared with the metrics store (record_clip /
+    # record_publish) so publish metadata can be matched back to the row.
+    video_id = extract_video_id(url)
+
     if settings.processed_check_enabled:
         try:
-            from shorts_clipper.core.processed_store import ProcessedStore, extract_video_id
+            from shorts_clipper.core.processed_store import ProcessedStore
 
             _store = ProcessedStore.from_path(settings.processed_videos_path)
-            _vid = extract_video_id(url)
-            if _store.is_processed(_vid):
-                log.warning("Video %s already processed — skipping reprocess.", _vid)
+            if _store.is_processed(video_id):
+                log.warning("Video %s already processed — skipping reprocess.", video_id)
                 return []
         except Exception as _store_err:
             log.warning("Processed-store check failed (continuing): %s", _store_err)
@@ -448,6 +453,7 @@ def run(
 
             output_paths: list[Path] = []
             last_track: Path | None = None
+            publish_failed = False
 
             if settings.bgm_mode != "off":
                 try:
@@ -841,6 +847,8 @@ def run(
                     "tags": [],
                     "publish_status": "idle",
                     "publish_error": None,
+                    "video_id": video_id,
+                    "source_url": url,
                 }
 
                 s_title = source_title or ""
@@ -977,6 +985,7 @@ def run(
                         )
                         meta["publish_status"] = "failed"
                         meta["publish_error"] = "Upload blocked: metadata generation failed."
+                        publish_failed = True
                         json_path.write_text(
                             json.dumps(meta, indent=2, ensure_ascii=False),
                             encoding="utf-8",
@@ -1023,6 +1032,7 @@ def run(
                             video_path=current_output_path,
                             metadata=clip_metadata,
                             platforms=platforms,
+                            video_id=video_id,
                         )
 
                         # Update metadata JSON with results
@@ -1043,6 +1053,8 @@ def run(
                             meta["publish_status"] = "partial_success"
                         else:
                             meta["publish_status"] = "failed"
+                        if meta["publish_status"] in ("failed", "partial_success"):
+                            publish_failed = True
 
                         json_path.write_text(
                             json.dumps(meta, indent=2, ensure_ascii=False),
@@ -1056,6 +1068,7 @@ def run(
                     except Exception as upload_err:
                         meta["publish_status"] = "failed"
                         meta["publish_error"] = str(upload_err)
+                        publish_failed = True
                         json_path.write_text(
                             json.dumps(meta, indent=2, ensure_ascii=False),
                             encoding="utf-8",
@@ -1079,12 +1092,12 @@ def run(
     run_ctx.export_all()
     run_ctx.verify_run()
 
-    if output_paths:
+    if output_paths and settings.processed_check_enabled and not publish_failed:
         try:
-            from shorts_clipper.core.processed_store import ProcessedStore, extract_video_id
+            from shorts_clipper.core.processed_store import ProcessedStore
 
             ProcessedStore.from_path(settings.processed_videos_path).mark_processed(
-                extract_video_id(url), url, title=source_title
+                video_id, url, title=source_title
             )
         except Exception as _store_err:
             log.warning("Failed to record processed video %s: %s", url, _store_err)

@@ -105,10 +105,11 @@ def auto_discover(
             to the de-dup set. A missing or unreadable DB is ignored gracefully.
 
     Returns:
-        List of dicts with keys ``url``, ``video_id``, ``title``, ``platform``,
-        plus ``score`` (rounded 1 dp) and ``source`` (``"channel"`` / ``"search"``)
-        when *ranking* is on. Returns ``[]`` on any error so the pipeline is
-        never interrupted.
+        List of dicts with keys ``url``, ``video_id``, ``title``, ``platform``
+        and ``channel`` (source channel name from the provider, ``""`` when
+        unknown), plus ``score`` (rounded 1 dp) and ``source`` (``"channel"`` /
+        ``"search"``) when *ranking* is on. Returns ``[]`` on any error so the
+        pipeline is never interrupted.
     """
     try:
         store = ProcessedStore.from_path(settings.processed_videos_path)
@@ -164,6 +165,7 @@ def auto_discover(
                 "video_id": video.video_id,
                 "title": video.title,
                 "platform": video.platform,
+                "channel": str(video.extra.get("channel", "") or ""),
             }
             if ranking and video.video_id in scores_map:
                 item["source"] = kind_map.get(video.video_id, "search")

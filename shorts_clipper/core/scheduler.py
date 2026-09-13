@@ -87,6 +87,7 @@ def update_publish_entry(path: str | Path, **fields) -> None:
 
 
 def _publish_due_once(settings: Settings) -> None:
+    from shorts_clipper.core.processed_store import extract_video_id
     from shorts_clipper.publishers.manager import PublishingEngine
     from shorts_clipper.publishers.models import ClipMetadata
 
@@ -100,6 +101,11 @@ def _publish_due_once(settings: Settings) -> None:
 
         meta = entry.get("metadata") or {}
         platforms = entry.get("platforms") or settings.publish_platforms
+        video_id = meta.get("video_id") or (
+            extract_video_id(meta.get("source_url") or "")
+            if meta.get("source_url")
+            else None
+        )
         clip_metadata = ClipMetadata(
             title=meta.get("title") or "",
             description=meta.get("description") or "",
@@ -112,6 +118,7 @@ def _publish_due_once(settings: Settings) -> None:
                 video_path=video_path,
                 metadata=clip_metadata,
                 platforms=platforms,
+                video_id=video_id,
             )
             successes = [r for r in results.values() if r.success]
             if successes:
