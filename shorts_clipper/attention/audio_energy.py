@@ -92,6 +92,7 @@ def extract_audio_energy(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=600,
         )
         if proc.returncode != 0 or not proc.stdout:
             return []

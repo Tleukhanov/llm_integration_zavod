@@ -176,10 +176,38 @@ class StatsCacheTests(TmpTestCase):
         with _patch_env(cache_dir):
             from shorts_clipper.core.cache import set_cached
 
-            set_cached(VID, {"views": 5, "likes": 2, "comments": 1})
+            set_cached(f"{VID}:stats", {"views": 5, "likes": 2, "comments": 1})
             stats = yt_dlp.fetch_video_stats(VID_URL)
             mock_run.assert_not_called()
             self.assertEqual(stats, {"views": 5, "likes": 2, "comments": 1})
+
+
+class CacheResolveTests(TmpTestCase):
+    @mock.patch("shorts_clipper.downloader.yt_dlp.subprocess.run")
+    def test_cache_resolve_recovers_non_m4a_audio(self, mock_run):
+        cache_dir = self.tmp_path / "cache"
+        out = self.tmp_path / "audio.webm"
+        with _patch_env(cache_dir):
+            cached = yt_dlp.dl_cache.media_cache_path(VID, "audio", None, None, ".webm")
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            cached.write_bytes(b"CACHED_WEBM_AUDIO")
+            (yt_dlp.dl_cache._sidecar_path(cached)).write_text(
+                json.dumps({"complete": True}), encoding="utf-8"
+            )
+
+            result = yt_dlp.download_audio(VID_URL, out)
+            mock_run.assert_not_called()
+            self.assertEqual(out.read_bytes(), b"CACHED_WEBM_AUDIO")
+
+    def test_store_media_skips_empty_file(self):
+        cache_dir = self.tmp_path / "cache"
+        empty = self.tmp_path / "empty.m4a"
+        empty.write_bytes(b"")
+        with _patch_env(cache_dir):
+            stored = yt_dlp.dl_cache.store_media(VID, "audio", None, None, empty)
+            self.assertIsNone(stored)
+            hit = yt_dlp.dl_cache.cache_resolve(VID, "audio", None, None)
+            self.assertIsNone(hit)
 
 
 if __name__ == "__main__":

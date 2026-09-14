@@ -56,11 +56,36 @@ def cache_hit(video_id: str, kind: str, start, end, ext: str) -> Path | None:
     return None
 
 
+def cache_resolve(video_id: str, kind: str, start, end) -> Path | None:
+    """Return a complete cached artifact for a section regardless of media ext."""
+    if not video_id:
+        return None
+    directory = cache_root() / video_id
+    if not directory.is_dir():
+        return None
+    prefix = f"{kind}_{_section_key(start, end)}."
+    try:
+        for path in directory.iterdir():
+            if path.is_file() and path.name.startswith(prefix):
+                hit = cache_hit(video_id, kind, start, end, path.suffix)
+                if hit is not None:
+                    return hit
+    except OSError:
+        return None
+    return None
+
+
 def store_media(video_id: str, kind: str, start, end, src: Path) -> Path | None:
-    """Copy a just-downloaded file into the cache (best-effort)."""
+    """Copy a just-downloaded file into the cache (best-effort, non-empty only)."""
     if not video_id or not src.exists():
         return None
     src = Path(src)
+    try:
+        size = src.stat().st_size
+    except OSError:
+        return None
+    if size <= 0:
+        return None
     dst = media_cache_path(video_id, kind, start, end, src.suffix)
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +98,7 @@ def store_media(video_id: str, kind: str, start, end, src: Path) -> Path | None:
                     "kind": kind,
                     "start": start,
                     "end": end,
+                    "size": size,
                     "complete": True,
                     "created_at": datetime.now().isoformat(timespec="seconds"),
                 }

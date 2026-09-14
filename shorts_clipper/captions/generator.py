@@ -746,11 +746,15 @@ def burn_subtitles(
         )
 
         log.info("Running FFmpeg: %s", " ".join(cmd))
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("FFmpeg subtitle burn timed out after 600s") from None
         if result.returncode != 0:
             log.error("FFmpeg stderr: %s", result.stderr[-2000:])
             raise RuntimeError(f"FFmpeg subtitle burn failed (exit {result.returncode})")

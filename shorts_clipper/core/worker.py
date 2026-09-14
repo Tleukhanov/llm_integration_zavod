@@ -386,7 +386,7 @@ def run_worker() -> None:
                     worker_progress(90)
 
                 try:
-                    from shorts_clipper.render.thumbnailer import extract_thumbnail
+                    from shorts_clipper.rendering.thumbnailer import extract_thumbnail
 
                     extract_thumbnail(current_output_path)
                 except Exception as thumb_err:

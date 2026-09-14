@@ -360,7 +360,7 @@ def download_audio(
     output_path = Path(output_path)
 
     vid = video_id_from_url(url)
-    cached = dl_cache.cache_hit(vid, "audio", start_time, end_time, ".m4a") if vid else None
+    cached = dl_cache.cache_resolve(vid, "audio", start_time, end_time) if vid else None
     if cached:
         if dl_cache.restore_media(output_path, cached):
             log.info(
@@ -655,7 +655,8 @@ def fetch_video_stats(url: str) -> dict | None:
     if vid:
         from shorts_clipper.core.cache import get_cached, set_cached
 
-        cached = get_cached(vid)
+        stats_key = f"{vid}:stats"
+        cached = get_cached(stats_key)
         if cached and "views" in cached:
             return {
                 "views": cached.get("views"),
@@ -687,7 +688,7 @@ def fetch_video_stats(url: str) -> dict | None:
     }
     if vid:
         try:
-            set_cached(vid, stats)
+            set_cached(f"{vid}:stats", stats)
         except Exception:
             pass
     return stats

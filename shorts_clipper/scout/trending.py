@@ -31,6 +31,21 @@ def _is_english_key(k: str) -> bool:
     return k_lower == "en" or k_lower.startswith("en-")
 
 
+def _safe_count(value) -> int:
+    """Parse a numeric metric defensively; yt-dlp may emit '1,234' or junk."""
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float):
+        return max(int(value), 0)
+    s = str(value).strip().replace(",", "").replace(" ", "")
+    try:
+        return max(int(s), 0)
+    except ValueError:
+        return 0
+
+
 def compute_scout_v2_intermediate_score(
     video: dict, now: datetime, channel_history: dict[str, dict]
 ) -> float:
@@ -52,9 +67,9 @@ def compute_scout_v2_intermediate_score(
     now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now
     hours_live = max((now_utc - published).total_seconds() / 3600, 1)
 
-    views = max(int(video.get("view_count") or 0), 1)
-    likes = int(video.get("like_count") or 0)
-    comments = int(video.get("comment_count") or 0)
+    views = max(_safe_count(video.get("view_count")), 1)
+    likes = _safe_count(video.get("like_count"))
+    comments = _safe_count(video.get("comment_count"))
 
     views_velocity = views / hours_live
 
@@ -256,9 +271,9 @@ def compute_virality_score(video: dict, now: datetime) -> float:
     now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now
     hours_live = max((now_utc - published).total_seconds() / 3600, 1)
 
-    views = max(int(video.get("view_count") or 0), 1)
-    likes = int(video.get("like_count") or 0)
-    comments = int(video.get("comment_count") or 0)
+    views = max(_safe_count(video.get("view_count")), 1)
+    likes = _safe_count(video.get("like_count"))
+    comments = _safe_count(video.get("comment_count"))
 
     views_velocity = views / hours_live
     velocity_score = views_velocity / 1000
@@ -292,7 +307,7 @@ def _get_attempt_max_age(base_days: int, attempt: int) -> int | None:
     if attempt == 3:
         relaxed = max(base_days * 4, 90)
         log.warning("Scout: still no candidates. Relaxing window to %d days.", relaxed)
-        return base_days * 10
+        return relaxed
     return None
 
 
@@ -648,7 +663,7 @@ def get_trending_link(
                         log.info("Rejected video %s: duration too long", vid)
                         continue
 
-                views = int(video.get("view_count") or 0)
+                views = _safe_count(video.get("view_count"))
                 if views > 0 and views < _MIN_VIEWS:
                     metrics.rejected_low_views += 1
                     log.info("Rejected video %s: views below threshold", vid)

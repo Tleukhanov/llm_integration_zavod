@@ -59,6 +59,7 @@ def _decode_mono_pcm(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=600,
         )
         if proc.returncode != 0 or not proc.stdout:
             return None

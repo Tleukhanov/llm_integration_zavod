@@ -6,7 +6,9 @@ from unittest.mock import Mock, patch
 
 from shorts_clipper.core.models import TranscriptSegment
 from shorts_clipper.scout.trending import (
+    _get_attempt_max_age,
     _has_english,
+    _safe_count,
     compute_scout_v2_intermediate_score,
     get_trending_link,
 )
@@ -52,6 +54,33 @@ class ScoutV2Tests(unittest.TestCase):
         self.assertTrue(score > 0)
         # Verify it doesn't fail on missing fields
         self.assertTrue(compute_scout_v2_intermediate_score({}, now, {}) == 0.0)
+
+    def test_scoring_survives_legacy_metric_formats(self):
+        now = datetime.now(UTC)
+        video = {
+            "published_at": datetime.now(UTC).isoformat(),
+            "view_count": "1,234",  # legacy human-formatted count
+            "like_count": "oops-not-a-number",
+            "comment_count": None,
+        }
+        score = compute_scout_v2_intermediate_score(video, now, {})
+        self.assertIsInstance(score, float)
+
+    def test_safe_count(self):
+        self.assertEqual(_safe_count(None), 0)
+        self.assertEqual(_safe_count("1,234"), 1234)
+        self.assertEqual(_safe_count("12 345"), 12345)
+        self.assertEqual(_safe_count("junk"), 0)
+        self.assertEqual(_safe_count(-5), 0)
+        self.assertEqual(_safe_count(42), 42)
+
+    def test_get_attempt_max_age_matches_logged_value(self):
+        self.assertEqual(_get_attempt_max_age(7, 1), 7)
+        self.assertEqual(_get_attempt_max_age(7, 2), 30)
+        self.assertEqual(_get_attempt_max_age(7, 3), 90)
+        self.assertEqual(_get_attempt_max_age(14, 3), 90)
+        self.assertEqual(_get_attempt_max_age(30, 3), 120)
+        self.assertIsNone(_get_attempt_max_age(7, 4))
 
     @patch("shorts_clipper.attention.engine.SimulationEngine")
     @patch("shorts_clipper.highlight_detection.scoring.SemanticCandidateGenerator")
