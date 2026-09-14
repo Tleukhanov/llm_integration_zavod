@@ -2,8 +2,9 @@
 Description=Daily Shorts Metrics trigger
 
 [Timer]
-OnBootSec=10min
-OnCalendar=*-*-* 12:30:00
+# Run well outside the daily factory window (12:00, up to 4h) and late on boot
+OnBootSec=4h
+OnCalendar=*-*-* 02:00:00
 Persistent=true
 
 [Install]

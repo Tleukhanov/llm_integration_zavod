@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# System deps: ffmpeg + timezone data
+# System deps: ffmpeg + timezone data + tini (PID 1 signal/pid reaping)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -18,6 +18,9 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Entrypoint — no args: channel defaults from SHORTS_CHANNEL (env / .env),
-# clip count via --env-file at runtime (e.g. docker run --env-file .env ...).
+# Entrypoint — tini as PID 1 forwards SIGTERM/SIGINT to python so a
+# `docker stop` cleanly tears down child ffmpeg processes. No args:
+# channel defaults from SHORTS_CHANNEL (env / .env), clip count via
+# --env-file at runtime (e.g. docker run --env-file .env ...).
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "scripts/multi_channel.py"]

@@ -46,7 +46,10 @@ jobs:
 
       - name: Write .env from secret
         if: ${{ secrets.FACTORY_ENV != '' }}
-        run: echo "${{ secrets.FACTORY_ENV }}" > .env
+        shell: bash
+        env:
+          FACTORY_ENV: ${{ secrets.FACTORY_ENV }}
+        run: printf '%s\n' "$FACTORY_ENV" > .env
 
       - name: Skip if no secret
         if: ${{ secrets.FACTORY_ENV == '' }}

@@ -8,3 +8,5 @@ uvicorn[standard]>=0.29
 anyio>=4.0
 curl-cffi>=0.15.0
 boto3>=1.34.0
+av>=11
+requests>=2.31

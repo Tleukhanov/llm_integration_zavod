@@ -8,6 +8,14 @@ BASE_DIR="${BASE_DIR:-/srv/shorts-clipper}"
 REPO="${GIT_REPO:-https://github.com/anomalyco/shorts-clipper.git}"
 PYTHON_MIN="3.10"
 
+# systemd unit values (WorkingDirectory/ExecStart) cannot contain spaces or '|'
+case "$BASE_DIR" in
+  *[[:space:]\|]*)
+    echo "ERROR: BASE_DIR must not contain spaces or '|' (got: $BASE_DIR)" >&2
+    exit 1
+    ;;
+esac
+
 # ── 1. System deps ────────────────────────────────────────────────
 echo "==> Checking system dependencies …"
 for cmd in git ffmpeg python3; do
@@ -72,7 +80,7 @@ echo ""
 echo "=== Shorts Factory installed ==="
 echo "  Repo:          $BASE_DIR"
 echo "  Timer:         shorts-factory.timer (daily at 12:00 + 5 min after boot)"
-echo "  Metrics:       shorts-metrics.timer (daily at 12:30)"
+echo "  Metrics:       shorts-metrics.timer (daily at 02:00)"
 echo "  Manual run:    systemctl start shorts-factory.service"
 echo "  Logs:          journalctl -u shorts-factory -f"
 echo ""
