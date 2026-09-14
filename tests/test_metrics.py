@@ -5,6 +5,7 @@ with fixed, injectable ``publish_ts`` values.
 """
 
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -209,6 +210,58 @@ class MetricsStoreTests(unittest.TestCase):
             ids = {r["video_id"] for r in store.unpublished(min_age_seconds=3 * 3600)}
             self.assertEqual(ids, {"old", "pub"})
             store.close()
+
+    def test_published_rows_refreshed_after_ttl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.record_clip(ClipRecord(video_id="pub", source_url="https://youtu.be/pub",
+                                         published=True, publish_ts=_past_iso(10)))
+            store.mark_published("pub", publish_ts=_past_iso(10))
+            store.update_stats("pub", views=10)
+            # Backdate the collection so the row is "stale".
+            store._conn.execute(
+                "UPDATE clips SET collected_at=? WHERE video_id='pub'", (_past_iso(3),)
+            )
+            store._conn.commit()
+
+            # Inside the default 24h TTL → skipped; older TTL → re-collected.
+            self.assertEqual({r["video_id"] for r in store.unpublished()}, set())
+            ids = {r["video_id"] for r in store.unpublished(refresh_ttl_seconds=3600)}
+            self.assertEqual(ids, {"pub"})
+            store.close()
+
+    def test_migrates_legacy_schema_preserving_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metrics.sqlite"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                "CREATE TABLE clips ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT, source_url TEXT, "
+                "title TEXT, hook TEXT, affiliate_id TEXT, channel TEXT, "
+                "published INTEGER DEFAULT 0, publish_ts TEXT, rendered_path TEXT, "
+                "views INTEGER, likes INTEGER, comments INTEGER, collected_at TEXT, "
+                "UNIQUE(video_id))"
+            )
+            conn.execute(
+                "INSERT INTO clips "
+                "(video_id, source_url, channel, published, publish_ts, views) "
+                "VALUES (?, ?, ?, 1, ?, ?)",
+                ("legacy1", "https://youtu.be/legacy1", "team_x", _past_iso(10), 120),
+            )
+            conn.commit()
+            conn.close()
+
+            store = MetricsStore(db_path)
+            try:
+                cols = {
+                    r["name"] for r in store._conn.execute("PRAGMA table_info(clips)").fetchall()
+                }
+                self.assertTrue({"source_channel", "platform", "platform_id", "short_url"} <= cols)
+                self.assertIn("legacy1", {r["video_id"] for r in store.unpublished()})
+                self.assertIn("team_x", store.channels())
+                self.assertEqual(store.stats_channel("team_x")["views"], 120)
+            finally:
+                store.close()
 
     def test_top_hooks_groups_by_hook_text(self):
         with tempfile.TemporaryDirectory() as tmp:

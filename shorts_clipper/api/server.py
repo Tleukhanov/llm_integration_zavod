@@ -1133,7 +1133,11 @@ def _write_env_merged(updates: dict[str, str]) -> None:
     appended. The file is replaced atomically via a temp file + os.replace.
     """
     env_path = Path(".env")
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    lines = (
+        env_path.read_text(encoding="utf-8-sig").splitlines()
+        if env_path.exists()
+        else []
+    )
     merged: list[str] = []
     for line in lines:
         stripped = line.strip()

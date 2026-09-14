@@ -137,10 +137,10 @@ _transcription_semaphore = threading.Semaphore(1)
 
 def _normalize_language(lang: str | None) -> str | None:
     """Map an empty or ``"auto"`` language hint to None (auto-detect)."""
-    lang = (lang or "").strip()
+    lang = (lang or "").strip().lower()
     if lang in ("", "auto"):
         return None
-    return lang
+    return lang or None
 
 
 def get_whisper_model():
@@ -167,12 +167,14 @@ def get_whisper_model():
 
         # Explicitly configure cpu_threads=4 to match typical VPS sizing.
         # This prevents runaway CPU oversubscription and OpenMP thread contention.
+        # download_root is resolved to an absolute path so the model cache does
+        # not silently move whenever the process cwd changes across deploys.
         _global_model = WhisperModel(
             settings.whisper_model,
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
             cpu_threads=4,
-            download_root=str(settings.models_dir),
+            download_root=str(Path(settings.models_dir).expanduser().resolve()),
         )
         t_end = time.time()
         log.info(f"[WHISPER] model_load_time: {t_end - t_start:.1f}s")

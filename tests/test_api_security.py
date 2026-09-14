@@ -137,6 +137,20 @@ class SaveSettingsMergeTests(unittest.TestCase):
         self.assertEqual(env["GEMINI_API_KEY"], "secret_key")
         self.assertEqual(env["SHORTS_WHISPER_MODEL"], "large-v3")
 
+    def test_bom_env_preserves_first_key_and_secret(self):
+        self._chdir_tmp()
+        Path(".env").write_text(
+            "\ufeffGEMINI_API_KEY=secret_key\nTT_CLIENT_KEY=tk\n",
+            encoding="utf-8",
+        )
+        payload = server.SettingsModel(whisper_model="large-v3")
+        server.save_settings(payload)
+
+        env = _load_env_text(Path(".env").read_text(encoding="utf-8"))
+        self.assertEqual(env["GEMINI_API_KEY"], "secret_key")
+        self.assertEqual(env["TT_CLIENT_KEY"], "tk")
+        self.assertEqual(env["SHORTS_WHISPER_MODEL"], "large-v3")
+
 
 class GetSettingsNoLeakTests(unittest.TestCase):
     def _route(self):
@@ -171,6 +185,14 @@ class SettingsParsingTests(unittest.TestCase):
     def test_subtitle_style_read_from_env(self):
         s = self._from_env("SHORTS_SUBTITLE_STYLE=bottom_left\n")
         self.assertEqual(s.subtitle_style, "bottom_left")
+
+    def test_bom_first_key_still_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("\ufeffGEMINI_API_KEY=secret\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=True):
+                s = Settings.from_env(env_path)
+            self.assertEqual(s.gemini_api_key, "secret")
 
     def test_subtitle_style_default(self):
         s = self._from_env("SHORTS_WHISPER_MODEL=tiny.en\n")
@@ -281,7 +303,8 @@ class WhisperLanguageTests(unittest.TestCase):
             whisper_mod.get_whisper_model()
         fake_model_call.assert_called_once()
         self.assertEqual(
-            fake_model_call.call_args.kwargs["download_root"], str(Path("data/models"))
+            fake_model_call.call_args.kwargs["download_root"],
+            str(Path("data/models").expanduser().resolve()),
         )
 
 

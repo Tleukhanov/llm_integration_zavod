@@ -181,20 +181,29 @@ class MetricsStore:
     # Reads
     # ------------------------------------------------------------------
 
-    def unpublished(self, min_age_seconds: int = 0) -> list[dict]:
-        """Rows still needing stats collection, oldest publish_ts first.
+    def unpublished(
+        self,
+        min_age_seconds: int = 0,
+        refresh_ttl_seconds: int = 86400,
+    ) -> list[dict]:
+        """Rows needing a (re-)stats refresh, oldest publish_ts first.
 
-        Returns rows where ``published=0`` OR ``published=1`` and
-        ``collected_at IS NULL``, filtered to have a ``publish_ts``
-        older than ``min_age_seconds`` from now (NULL publish_ts passes).
+        Unlike a strict "never collected" scan, published clips are also
+        re-fetched once their last collection is older than
+        ``refresh_ttl_seconds`` (default 24h) so their view counts stay fresh,
+        and never-published rows are not hammered on every pass. Rows are
+        excluded while their ``publish_ts`` is younger than ``min_age_seconds``
+        (NULL publish_ts passes).
         """
-        cutoff = (datetime.now(UTC) - timedelta(seconds=min_age_seconds)).isoformat()
+        now = datetime.now(UTC)
+        cutoff = (now - timedelta(seconds=min_age_seconds)).isoformat()
+        refresh_before = (now - timedelta(seconds=refresh_ttl_seconds)).isoformat()
         rows = self._conn.execute(
             "SELECT * FROM clips "
-            "WHERE (published=0 OR collected_at IS NULL) "
+            "WHERE (collected_at IS NULL OR collected_at <= ?) "
             "AND (publish_ts IS NULL OR publish_ts <= ?) "
             "ORDER BY publish_ts ASC, id ASC",
-            (cutoff,),
+            (refresh_before, cutoff),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -211,7 +220,8 @@ class MetricsStore:
             "SUM(CASE WHEN collected_at IS NOT NULL THEN 1 ELSE 0 END) AS with_stats, "
             "SUM(views) AS views, SUM(likes) AS likes, SUM(comments) AS comments, "
             "AVG(views) AS avg_views "
-            "FROM clips WHERE channel=?",
+            "FROM clips "
+            "WHERE COALESCE(NULLIF(source_channel,''), channel)=?",
             (channel,),
         ).fetchone()
         return {
@@ -226,9 +236,17 @@ class MetricsStore:
         }
 
     def channels(self) -> list[str]:
-        """Distinct non-empty channel names, sorted."""
+        """Distinct non-empty aggregated channel keys, sorted.
+
+        Keys use the same ``COALESCE(NULLIF(source_channel,''), channel)``
+        expression every other aggregate groups by, so a listing returned here
+        always resolves to rows in :meth:`stats_channel` and
+        :meth:`channel_performance`.
+        """
         rows = self._conn.execute(
-            "SELECT DISTINCT channel FROM clips WHERE channel <> '' ORDER BY channel"
+            "SELECT DISTINCT COALESCE(NULLIF(source_channel,''), channel) AS channel "
+            "FROM clips WHERE COALESCE(NULLIF(source_channel,''), channel) <> '' "
+            "ORDER BY channel"
         ).fetchall()
         return [r["channel"] for r in rows]
 
@@ -385,7 +403,8 @@ def should_publish_today(store: MetricsStore, channel: str, daily_cap: int) -> b
     today = datetime.now(UTC).date().isoformat()
     row = store._conn.execute(
         "SELECT COUNT(*) AS n FROM clips "
-        "WHERE published=1 AND channel=? AND publish_ts LIKE ?",
+        "WHERE published=1 AND COALESCE(NULLIF(source_channel,''), channel)=? "
+        "AND publish_ts LIKE ?",
         (channel, f"{today}%"),
     ).fetchone()
     return row["n"] < daily_cap
