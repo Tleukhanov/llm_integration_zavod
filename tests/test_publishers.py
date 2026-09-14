@@ -505,6 +505,43 @@ def test_error_classification_resumable_and_network():
     assert _is_retriable_error(RuntimeError("timed out waiting for response")) is True
 
 
+def test_error_classification_structured_reasons():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    backend = FakeGoogleHttpError(
+        403, {"error": {"errors": [{"reason": "backendError"}]}}
+    )
+    assert _is_retriable_error(backend) is True
+
+    unavailable = FakeGoogleHttpError(503, {"error": {"status": "UNAVAILABLE"}})
+    assert _is_retriable_error(unavailable) is True
+
+    denied = FakeGoogleHttpError(
+        403, {"error": {"errors": [{"reason": "permissionDenied"}]}}
+    )
+    assert _is_retriable_error(denied) is False
+
+
+def test_error_classification_no_short_fragment_false_positives():
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    collision = FakeGoogleHttpError(
+        422,
+        {"error": {"message": "video id 'vid500xyz' rejected, connection reset"}},
+    )
+    assert _is_retriable_error(collision) is False
+
+
+def test_error_classification_requests_network_classes():
+    import requests
+
+    from shorts_clipper.publishers.manager import _is_retriable_error
+
+    assert _is_retriable_error(requests.exceptions.ConnectionError("backend down")) is True
+    assert _is_retriable_error(requests.exceptions.Timeout("timed out")) is True
+    assert _is_retriable_error(requests.exceptions.ChunkedEncodingError("boom")) is True
+
+
 def test_retry_after_parsing():
     from shorts_clipper.publishers.manager import _retry_after_seconds
 

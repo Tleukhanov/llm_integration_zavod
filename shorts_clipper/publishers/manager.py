@@ -18,6 +18,28 @@ log = logging.getLogger(__name__)
 
 RETRIABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
 
+# Structured Google-style reasons (error.errors[].reason / error.status in the
+# JSON body, lower-cased). These are matched against parsed fields, not text.
+_RETRIABLE_REASONS = frozenset({
+    "quotaexceeded",
+    "dailylimitexceeded",
+    "userratelimitexceeded",
+    "ratelimitexceeded",
+    "rateexceeded",
+    "resource_exhausted",
+    "backenderror",
+    "internalerror",
+    "unavailable",
+    "temporarily_unavailable",
+    "deadlineexceeded",
+})
+
+_RETRIABLE_STATUS_CODES = frozenset(str(c) for c in RETRIABLE_HTTP_STATUSES)
+
+# Long, distinctive phrases used as a last-resort fallback when the error body
+# is unstructured (plain text, no parseable JSON). Short/numeric fragments
+# (e.g. "500", "reset") are intentionally excluded: they false-positive on
+# random content like video ids inside error messages.
 _RETRIABLE_ERROR_FRAGMENTS = (
     "quotaexceeded",
     "dailylimitexceeded",
@@ -27,16 +49,14 @@ _RETRIABLE_ERROR_FRAGMENTS = (
     "resource_exhausted",
     "resumableuploaderror",
     "too many requests",
+    "temporarily unavailable",
     "temporarily_unavailable",
     "internal error",
-    "backend",
-    "connection",
-    "timeout",
+    "backenderror",
+    "service unavailable",
+    "connection reset by peer",
     "timed out",
-    "refused",
-    "reset",
-    "429",
-    "500",
+    "deadline exceeded",
 )
 
 _ID_KEYS = ("video_id", "publish_id", "media_id", "creation_id", "id")
@@ -137,17 +157,82 @@ def _retry_after_seconds(exc: Exception) -> int | None:
     return None
 
 
+def _pluck_reason(err: dict) -> str | None:
+    """Pull a Google-style reason/status from an `error` dict, lower-cased."""
+    if err.get("status"):
+        return str(err["status"]).lower()
+    for item in err.get("errors", []) or []:
+        if isinstance(item, dict) and item.get("reason"):
+            return str(item["reason"]).lower()
+    return None
+
+
+def _structured_reason(exc: Exception) -> str | None:
+    """Extract the structured reason/code from a platform error body, if any."""
+    details = getattr(exc, "error_details", None)
+    if isinstance(details, dict):
+        err = details.get("error", details)
+        if isinstance(err, dict):
+            reason = _pluck_reason(err)
+            if reason:
+                return reason
+    for attr in ("resp", "response"):
+        resp = getattr(exc, attr, None)
+        if resp is None:
+            continue
+        data = getattr(resp, "data", None)
+        if data is None:
+            try:
+                data = resp.json() if hasattr(resp, "json") else None
+            except Exception:
+                data = None
+        if isinstance(data, bytes):
+            try:
+                data = data.decode("utf-8", "replace")
+            except Exception:
+                data = None
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            continue
+        err = data.get("error", data)
+        if not isinstance(err, dict):
+            continue
+        reason = _pluck_reason(err)
+        if reason:
+            return reason
+        if err.get("code") in RETRIABLE_HTTP_STATUSES:
+            return str(err["code"])
+    return None
+
+
 def _is_retriable_error(exc: Exception) -> bool:
     """Classify an exception as transient (retryable) or permanent.
 
-    Retryable covers HTTP 408/429/500/502/503/504 as well as Google quota /
-    resumable-upload errors and network-style failures. Everything else
-    (4xx, protocol mistakes, validation) is permanent.
+    Retryable covers HTTP 408/429/500/502/503/504, Google quota/reason fields
+    read from the structured body, resumable-upload errors and network-style
+    failures. Everything else (4xx, protocol mistakes, validation) is permanent.
     """
     status = _status_code(exc)
     if status is not None and status in RETRIABLE_HTTP_STATUSES:
         return True
-    if exc.__class__.__name__.lower() == "resumableuploaderror":
+    cls = exc.__class__.__name__.lower()
+    if cls == "resumableuploaderror":
+        return True
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ),
+    ):
+        return True
+    reason = _structured_reason(exc)
+    if reason in _RETRIABLE_REASONS or reason in _RETRIABLE_STATUS_CODES:
         return True
     text = _error_text(exc)
     return any(frag in text for frag in _RETRIABLE_ERROR_FRAGMENTS)
@@ -415,23 +500,22 @@ class PublishingEngine:
                             f"⚠️ Idempotency verify failed for {platform_name} "
                             f"(id={known_platform_id}): {ve}"
                         )
-                        if known_platform_id:
-                            log.error(
-                                f"❌ Upload may exist for {platform_name} but id "
-                                f"{known_platform_id} could not be verified; skipping "
-                                f"re-upload to avoid a duplicate."
-                            )
-                            result = PublishResult(
-                                platform=platform_name,
-                                success=False,
-                                retry_count=attempt - 1,
-                                error_message=(
-                                    "Possible duplicate upload: id "
-                                    f"{known_platform_id} could not be verified "
-                                    f"(verify raised: {ve}); re-upload skipped"
-                                ),
-                            )
-                            break
+                        log.error(
+                            f"❌ Upload may exist for {platform_name} but id "
+                            f"{known_platform_id} could not be verified; skipping "
+                            f"re-upload to avoid a duplicate."
+                        )
+                        result = PublishResult(
+                            platform=platform_name,
+                            success=False,
+                            retry_count=attempt - 1,
+                            error_message=(
+                                "Possible duplicate upload: id "
+                                f"{known_platform_id} could not be verified "
+                                f"(verify raised: {ve}); re-upload skipped"
+                            ),
+                        )
+                        break
 
                 try:
                     log.info(
