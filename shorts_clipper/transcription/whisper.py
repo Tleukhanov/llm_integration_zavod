@@ -18,6 +18,30 @@ from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 log = logging.getLogger(__name__)
 
 
+def _disable_hf_symlinks() -> None:
+    """Force huggingface_hub to copy cached model files instead of symlinking.
+
+    The HF cache fans files out via symlinks by default, which requires the
+    Windows SeCreateSymbolicLinkPrivilege (Developer Mode / admin). Cloud CI
+    runners and fresh Windows boxes without Developer Mode crash with
+    OSError [WinError 1314]; copying is slower but universally safe. Both the
+    env var (read at import time) and the already-frozen module constant are
+    set so the runtime switch is honoured no matter when huggingface_hub was
+    first imported.
+    """
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    try:
+        from huggingface_hub import constants as _hf_constants
+    except Exception:
+        return
+    _hf_constants.HF_HUB_DISABLE_SYMLINKS = True
+    _hf_constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
+
+
+_disable_hf_symlinks()
+
+
 def _get_audio_bytes(media_path: Path) -> tuple[bytes, str]:
     """Ensure we have audio bytes and the correct mime type."""
     suffix = media_path.suffix.lower()
