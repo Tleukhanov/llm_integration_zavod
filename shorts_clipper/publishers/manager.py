@@ -322,6 +322,7 @@ class PublishingEngine:
         metadata: ClipMetadata,
         platforms: list[str],
         video_id: str | None = None,
+        transcript_text: str = "",
     ) -> dict[str, PublishResult]:
         """
         Publish a video to multiple platforms independently and concurrently.
@@ -330,9 +331,10 @@ class PublishingEngine:
             video_path: Path to the video file.
             metadata: Universal metadata for the clip.
             platforms: List of platform names to publish to.
-
-        Returns:
-            A dictionary mapping platform names to their PublishResult.
+            video_id: Optional source-video id recorded on success.
+            transcript_text: Optional spoken text of the clip; included in the
+                pre-publish compliance review so banned language is caught even
+                when title/description are clean.
         """
         results: dict[str, PublishResult] = {}
         self._video_id = video_id
@@ -342,11 +344,17 @@ class PublishingEngine:
         settings = Settings.from_env()
         if getattr(settings, "compliance_enabled", True):
             try:
-                from shorts_clipper.compliance.gate import ComplianceBlocked, ComplianceGate
+                from shorts_clipper.compliance.gate import (
+                    ComplianceBlocked,
+                    ComplianceGate,
+                    ComplianceVerdict,
+                )
 
                 gate = ComplianceGate(settings)
                 cta_text = getattr(settings, "affiliate_cta_text", "")
-                verdict = gate.check(metadata.title, metadata.description, cta_text)
+                verdict = gate.check(
+                    metadata.title, metadata.description, cta_text, transcript_text
+                )
 
                 if getattr(settings, "compliance_auto_disclaimers", True):
                     safe_desc, note = gate.suggest_description(
@@ -384,7 +392,24 @@ class PublishingEngine:
             except ComplianceBlocked:
                 raise
             except Exception as exc:
-                log.warning("Compliance gate error (continuing): %s", exc)
+                log.error("Compliance gate error — auto-blocking clip: %s", exc)
+                try:
+                    gate.write_block_report(
+                        video_path,
+                        metadata.title,
+                        metadata.description,
+                        ComplianceVerdict(
+                            passed=False,
+                            level="block",
+                            reasons=[f"compliance_gate_error: {exc}"],
+                            checks={"error": str(exc)},
+                        ),
+                    )
+                except Exception:
+                    pass
+                raise ComplianceBlocked(
+                    f"Compliance gate errored; clip auto-blocked: {exc}"
+                ) from exc
 
         # Authenticate all publishers first (fail early)
         publishers = {}

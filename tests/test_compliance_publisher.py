@@ -108,3 +108,52 @@ def test_pass_publishes(tmp_path, mock_registry, monkeypatch):
 
     results = engine.publish(video_path, meta, ["youtube"])
     assert results["youtube"].success is True
+
+
+def test_gate_exception_fails_closed(tmp_path, mock_registry, monkeypatch):
+    monkeypatch.setattr(
+        "shorts_clipper.publishers.manager.Settings.from_env",
+        lambda: _settings(tmp_path),
+    )
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("gate exploded")
+
+    monkeypatch.setattr(
+        "shorts_clipper.compliance.gate.ComplianceGate.check", _boom
+    )
+
+    engine = PublishingEngine(max_retries=1, base_backoff=0)
+    video_path = tmp_path / "gate_err.mp4"
+    video_path.touch()
+    meta = ClipMetadata(title="Нейтральное", description="Описание")
+
+    with pytest.raises(ComplianceBlocked):
+        engine.publish(video_path, meta, ["youtube"])
+
+    reports = list(tmp_path.glob("blocked_*.json"))
+    assert len(reports) == 1
+    assert "gate exploded" in reports[0].read_text(encoding="utf-8")
+
+
+def test_transcript_banned_word_blocks(tmp_path, mock_registry, monkeypatch):
+    monkeypatch.setattr(
+        "shorts_clipper.publishers.manager.Settings.from_env",
+        lambda: _settings(tmp_path),
+    )
+
+    engine = PublishingEngine(max_retries=1, base_backoff=0)
+    video_path = tmp_path / "transcript.mp4"
+    video_path.touch()
+    meta = ClipMetadata(
+        title="Красивый момент матча",
+        description="Просто хайлайты игры",
+    )
+
+    with pytest.raises(ComplianceBlocked):
+        engine.publish(
+            video_path,
+            meta,
+            ["youtube"],
+            transcript_text="Ребята, смотрите какие ставки на матч сегодня",
+        )

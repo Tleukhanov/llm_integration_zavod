@@ -14,7 +14,7 @@ from typing import Final
 # Compiled with IGNORECASE so "КАЗИНО", "Casino", "CASINO" all match.
 HARD_BLOCK_PATTERNS: Final[list[re.Pattern[str]]] = [
     # ── Finance / get-rich-quick (Russian) ──
-    re.compile(r"гарантированн", re.I),
+    re.compile(r"\bгарантированн", re.I),
     re.compile(r"заработай", re.I),
     re.compile(r"быстр(?:ый|ого) заработок", re.I),
     re.compile(r"доход за день", re.I),
@@ -39,8 +39,8 @@ HARD_BLOCK_PATTERNS: Final[list[re.Pattern[str]]] = [
     re.compile(r"earn \$\d", re.I),
     re.compile(r"no.?risk", re.I),
     # ── Gambling (Russian) ──
-    re.compile(r"казин[оа]", re.I),
-    re.compile(r"ставк[аиуе]", re.I),
+    re.compile(r"\bказин[оа]\b", re.I),
+    re.compile(r"\bставк[аиуе]\b", re.I),
     re.compile(r"букмекер", re.I),
     re.compile(r"беттинг", re.I),
     re.compile(r"aviator\s*casino", re.I),

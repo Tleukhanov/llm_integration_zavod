@@ -79,7 +79,7 @@ def test_preselected_partial_hit_behavior(
         )
 
         result = run(
-            "https://youtube.com/watch?v=dummy",
+            "https://youtube.com/watch?v=cachepartial9",
             settings=settings,
             count=3,
             upload=False,

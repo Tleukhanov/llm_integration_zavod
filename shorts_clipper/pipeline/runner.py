@@ -1033,6 +1033,9 @@ def run(
                             metadata=clip_metadata,
                             platforms=platforms,
                             video_id=video_id,
+                            transcript_text=" ".join(
+                                getattr(s, "text", "") or "" for s in precision_segments
+                            ),
                         )
 
                         # Update metadata JSON with results

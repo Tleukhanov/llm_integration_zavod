@@ -51,7 +51,7 @@ def test_fallback_metadata_respects_niche(
         )
 
         result = run(
-            "https://youtube.com/watch?v=dummy",
+            "https://youtube.com/watch?v=nichefallback7",
             settings=settings,
             count=1,
             upload=False,

@@ -48,6 +48,27 @@ def test_hard_block_patterns_dont_match_clean_strings(rules):
         assert not rules.scan_text(text), f"expected {text!r} to pass"
 
 
+def test_word_boundaries_avoid_innocent_substring_false_positives(rules):
+    innocent = [
+        "Приставка Nintendo Switch — общий обзор",
+        "Расставка мебели в комнате за один день",
+        "негарантированный результат мы не обещаем",
+    ]
+    for text in innocent:
+        assert not rules.scan_text(text), f"expected {text!r} to pass"
+
+
+def test_word_boundaries_still_block_real_terms(rules):
+    bad = [
+        "ставки на спорт сегодня",
+        "Открываем казино и рулетку",
+        "гарантированный доход за неделю",
+        "не гарантируем прибыль",
+    ]
+    for text in bad:
+        assert rules.scan_text(text), f"expected {text!r} to be flagged"
+
+
 def test_finance_detection(rules):
     finance_texts = [
         "Обучение трейдингу для начинающих",

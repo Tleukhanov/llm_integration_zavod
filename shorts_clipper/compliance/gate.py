@@ -99,6 +99,8 @@ Do NOT flag:
 TITLE: {title}
 DESCRIPTION: {description}
 CTA: {cta}
+TRANSCRIPT (spoken/narrated text of the video):
+{transcript}
 
 Return ONLY valid JSON:
 {{"violations": ["..."], "level": "pass"|"review"|"block"}}
@@ -133,13 +135,14 @@ class ComplianceGate:
         title: str,
         description: str,
         cta_text: str = "",
+        transcript_text: str = "",
     ) -> ComplianceVerdict:
         """Run the full compliance pipeline and return a verdict."""
         if not self._enabled:
             log.debug("Compliance gate disabled — PASS unconditionally")
             return ComplianceVerdict(passed=True, level="pass", checks={"disabled": True})
 
-        combined_text = f"{title}\n{description}\n{cta_text}"
+        combined_text = f"{title}\n{description}\n{cta_text}\n{transcript_text}"
         checks: dict = {}
         reasons: list[str] = []
         worst_level = "pass"
@@ -179,7 +182,7 @@ class ComplianceGate:
         llm_level = "pass"
         if self._llm_enabled and self._gemini_key:
             llm_level, llm_reasons, llm_checks = self._run_llm_review(
-                title, description, cta_text
+                title, description, cta_text, transcript_text
             )
             checks["llm"] = llm_checks
             if llm_level == "block":
@@ -237,7 +240,7 @@ class ComplianceGate:
     # ------------------------------------------------------------------
 
     def _run_llm_review(
-        self, title: str, description: str, cta_text: str
+        self, title: str, description: str, cta_text: str, transcript_text: str = ""
     ) -> tuple[str, list[str], dict]:
         """Call Gemini for a second-opinion compliance review.
 
@@ -249,7 +252,7 @@ class ComplianceGate:
 
             provider = GeminiProvider(api_key=self._gemini_key)
             prompt = _LLM_PROMPT_TEMPLATE.format(
-                title=title, description=description, cta=cta_text
+                title=title, description=description, cta=cta_text, transcript=transcript_text
             )
             t0 = time.monotonic()
             response = provider.generate_content(prompt, max_retries=2, initial_delay=2.0)
