@@ -381,20 +381,28 @@ def windows_and_peaks_from_audio(
 
     Returns:
         Triples of (ClipWindow, peak_absolute_seconds, peak_magnitude), sorted
-        by blended score descending.  Empty on failure.
+        by blended score descending.  Empty on failure.  Windows never extend
+        past ``total_seconds``.
     """
     try:
         from shorts_clipper.attention.audio_energy import extract_audio_energy
 
+        scan_max = settings.gameplay_scan_max_seconds
+        if total_seconds and total_seconds > 0:
+            import math
+
+            total_ceil = int(math.ceil(total_seconds))
+            scan_max = min(scan_max, total_ceil) if scan_max else total_ceil
+
         emotion = compute_excitement(
             audio_path,
             window_seconds=1.0,
-            max_seconds=settings.gameplay_scan_max_seconds,
+            max_seconds=scan_max,
         )
         energy = extract_audio_energy(
             audio_path,
             window_seconds=1.0,
-            max_seconds=settings.gameplay_scan_max_seconds,
+            max_seconds=scan_max,
         )
 
         if not emotion and not energy:
@@ -420,6 +428,14 @@ def windows_and_peaks_from_audio(
             max_length=settings.gameplay_max_length,
             top_n=settings.gameplay_top_windows,
         )
+        if total_seconds and total_seconds > 0:
+            windows = [
+                w for w in windows if w.start < total_seconds
+            ]
+            windows = [
+                ClipWindow(start=w.start, end=min(w.end, total_seconds))
+                for w in windows
+            ]
         peak_data = _cluster_peaks_with_magnitudes(blended, windows)
         return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data)]
     except Exception as exc:

@@ -135,8 +135,25 @@ class WindowsFromAudioTests(unittest.TestCase):
         mock_energy.return_value = [1.0] * 30
         windows_from_audio(Path("fake.m4a"), 60.0, self._settings())
         _, kwargs = mock_energy.call_args
-        self.assertEqual(kwargs["max_seconds"], 3600)
+        # total_seconds (60) < scan_max (3600) → capped to 60
+        self.assertEqual(kwargs["max_seconds"], 60)
         self.assertEqual(kwargs["window_seconds"], 1.0)
+
+    @mock.patch("shorts_clipper.attention.gameplay.extract_audio_energy")
+    def test_scan_max_uncapped_when_total_exceeds_it(self, mock_energy):
+        mock_energy.return_value = [1.0] * 100
+        windows_from_audio(Path("fake.m4a"), 5000.0, self._settings())
+        _, kwargs = mock_energy.call_args
+        # total_seconds (5000) > scan_max (3600) → scan_max passed through
+        self.assertEqual(kwargs["max_seconds"], 3600)
+
+    @mock.patch("shorts_clipper.attention.gameplay.extract_audio_energy")
+    def test_windows_never_exceed_total_seconds(self, mock_energy):
+        mock_energy.return_value = [1.0] * 120
+        windows = windows_from_audio(Path("fake.m4a"), 30.0, self._settings())
+        for w in windows:
+            self.assertLessEqual(w.end, 30.0)
+            self.assertGreaterEqual(w.start, 0.0)
 
     @mock.patch("shorts_clipper.attention.gameplay.extract_audio_energy")
     def test_empty_energy_returns_empty(self, mock_energy):
