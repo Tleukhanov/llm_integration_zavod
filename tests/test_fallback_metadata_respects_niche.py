@@ -25,7 +25,11 @@ def test_fallback_metadata_respects_niche(
     mock_fetch_subs,
     tmp_path,
 ):
-    settings = Settings(gemini_api_key="dummy", youtube_api_key="dummy")
+    settings = Settings(
+        gemini_api_key="dummy",
+        youtube_api_key="dummy",
+        processed_videos_path=str(tmp_path / "processed.json"),
+    )
     preselected = [(ClipWindow(start=10.0, end=20.0), "crop_center")]
 
     mock_fetch_subs.return_value = [{"start": 0.0, "end": 100.0, "text": "Dummy text"}]

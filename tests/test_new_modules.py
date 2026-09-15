@@ -1,5 +1,6 @@
 """Tests for the new package modules added in session 2."""
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +11,7 @@ from shorts_clipper.captions.generator import (
     _build_ass_chunks,
     _seconds_to_ass_time,
 )
-from shorts_clipper.core.cache import get_cached, set_cached
+from shorts_clipper.core.cache import get_cached, purge_expired, set_cached
 from shorts_clipper.core.models import TranscriptSegment, TranscriptWord
 from shorts_clipper.scout.keywords import build_queries
 from shorts_clipper.scout.trending import _has_english
@@ -111,6 +112,37 @@ class ScoutCacheTests(unittest.TestCase):
         with patch("shorts_clipper.core.cache._DB_PATH", Path("/nonexistent/path/jobs.db")):
             result = get_cached("missing")
         self.assertIsNone(result)
+
+    def test_ttl_expiry_and_purge(self):
+        """Verify TTL is enforced consistently (all timestamps are UTC)."""
+        import sqlite3
+        from datetime import datetime, timezone, timedelta
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.db"
+            with patch("shorts_clipper.core.cache._DB_PATH", db_path):
+                # Ensure table exists by performing a round-trip
+                set_cached("roundtrip", {"id": "x"})
+                self.assertIsNotNone(get_cached("roundtrip"))
+
+                # ttl_hours=0 → expired immediately (now > stored_at + 0)
+                set_cached("stale", {"id": "y"}, ttl_hours=0)
+                self.assertIsNone(get_cached("stale"))
+
+                # purge_expired: write a row with cached_at set 72h ago UTC, ttl=1h
+                utc_72h_ago = (
+                    datetime.now(timezone.utc) - timedelta(hours=72)
+                ).replace(tzinfo=None).isoformat()
+                with contextlib.closing(sqlite3.connect(db_path)) as con:
+                    con.execute(
+                        "INSERT INTO metadata_cache (video_id, metadata_json, cached_at, ttl_hours) "
+                        "VALUES (?, ?, ?, ?)",
+                        ("expired", "{}", utc_72h_ago, 1),
+                    )
+                    con.commit()
+                removed = purge_expired()
+                self.assertGreaterEqual(removed, 1)
+                self.assertIsNone(get_cached("expired"))
 
 
 class ScoutFilterTests(unittest.TestCase):

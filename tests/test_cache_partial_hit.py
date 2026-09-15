@@ -26,7 +26,11 @@ def test_preselected_partial_hit_behavior(
 ):
     from shorts_clipper.core.models import TranscriptSegment
 
-    settings = Settings(gemini_api_key="dummy", youtube_api_key="dummy")
+    settings = Settings(
+        gemini_api_key="dummy",
+        youtube_api_key="dummy",
+        processed_videos_path=str(tmp_path / "processed.json"),
+    )
 
     preselected = [
         (ClipWindow(start=10.0, end=20.0), "crop_center"),

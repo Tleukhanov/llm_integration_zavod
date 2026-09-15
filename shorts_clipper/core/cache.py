@@ -8,11 +8,16 @@ TTL default: 6 hours. Configurable per call.
 import json
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _lock = threading.Lock()
 _DB_PATH = Path("outputs/jobs.db")
+
+
+def _utc_now_iso() -> str:
+    """UTC-naive ISO timestamp — SQLite ``datetime('now')`` is also UTC."""
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def _ensure_table(con: sqlite3.Connection):
@@ -42,7 +47,8 @@ def get_cached(video_id: str) -> dict | None:
                     return None
                 metadata_json, cached_at, ttl_hours = row
                 cached_dt = datetime.fromisoformat(cached_at)
-                if datetime.now() > cached_dt + timedelta(hours=ttl_hours):
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                if now_utc > cached_dt + timedelta(hours=ttl_hours):
                     con.execute("DELETE FROM metadata_cache WHERE video_id = ?", (video_id,))
                     con.commit()
                     return None
@@ -69,7 +75,7 @@ def set_cached(video_id: str, metadata: dict, ttl_hours: int = 6) -> None:
                     """INSERT OR REPLACE INTO metadata_cache
                        (video_id, metadata_json, cached_at, ttl_hours)
                        VALUES (?, ?, ?, ?)""",
-                    (video_id, json.dumps(safe), datetime.now().isoformat(), ttl_hours),
+                    (video_id, json.dumps(safe), _utc_now_iso(), ttl_hours),
                 )
                 con.commit()
         except Exception:
