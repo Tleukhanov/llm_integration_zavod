@@ -67,7 +67,7 @@ def compute_scout_v2_intermediate_score(
     now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now
     hours_live = max((now_utc - published).total_seconds() / 3600, 1)
 
-views = max(_safe_count(video.get("view_count")), 1)
+    views = max(_safe_count(video.get("view_count")), 1)
     likes = _safe_count(video.get("like_count"))
     comments = _safe_count(video.get("comment_count"))
 
