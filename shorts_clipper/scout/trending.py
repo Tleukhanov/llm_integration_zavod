@@ -67,7 +67,7 @@ def compute_scout_v2_intermediate_score(
     now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now
     hours_live = max((now_utc - published).total_seconds() / 3600, 1)
 
-    views = max(_safe_count(video.get("view_count")), 1)
+views = max(_safe_count(video.get("view_count")), 1)
     likes = _safe_count(video.get("like_count"))
     comments = _safe_count(video.get("comment_count"))
 
@@ -184,10 +184,10 @@ def _is_cancelled(job_id: str | None) -> bool:
     if not job_id:
         return False
     try:
-        from shorts_clipper.core.queue import JobQueue
+        from shorts_clipper.core.queue import JobQueue, JobStatus
 
         job = JobQueue().get(job_id)
-        return job is not None and job.get("status") == "cancelled"
+        return job is not None and job.status == JobStatus.CANCELLED
     except Exception:
         return False
 
@@ -206,6 +206,7 @@ def fetch_metadata_batch(video_ids: list[str]) -> list[dict]:
             + [
                 "--dump-json",
                 "--skip-download",
+                "--ignore-errors",
                 "--retries",
                 "1",
                 "--socket-timeout",
@@ -381,6 +382,7 @@ def _discover_via_ytdlp(query: str, max_age_days: int, metrics: ScoutMetrics) ->
             "--dump-json",
             "--skip-download",
             "--flat-playlist",
+            "--ignore-errors",
             "--retries",
             "1",
             "--socket-timeout",
@@ -758,11 +760,11 @@ def get_trending_link(
 
                 stage_b_target = int(os.getenv("SCOUT_STAGE_B_LIMIT", "3"))
 
-                for batch_start in range(0, len(all_finalists), stage_b_target):
+                for batch_start in range(0, len(finalists), stage_b_target):
                     if winner:
                         break
 
-                    batch_finalists = all_finalists[batch_start : batch_start + stage_b_target]
+                    batch_finalists = finalists[batch_start : batch_start + stage_b_target]
                     local_scored_candidates = []
 
                     for v in batch_finalists:

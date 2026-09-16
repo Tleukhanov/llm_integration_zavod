@@ -4,6 +4,11 @@ Add new niches here. Do not use rotating random keywords.
 Each niche maps to specific, relevant search terms.
 """
 
+import logging
+import time
+
+log = logging.getLogger(__name__)
+
 NICHE_KEYWORDS: dict[str, list[str]] = {
     "tech": [
         "AI news",
@@ -126,17 +131,11 @@ def _expand_niche_dynamically(niche: str) -> list[str]:
         response = provider.generate_content(prompt)
         parts = [p.strip() for p in response.text.split(",") if p.strip()]
         if len(parts) >= 3:
-            import time
-
-            print("Sleeping 35 seconds after niche expansion to respect 2 RPM limit...")
+            log.info("Sleeping 35 seconds after niche expansion to respect 2 RPM limit...")
             time.sleep(35)
             return parts
     except Exception:
         pass
-    import time
-
-    print("Sleeping 35 seconds after failed niche expansion to respect 2 RPM limit...")
-    time.sleep(35)
     return ["tips", "story", "analysis", "news", "guide", "highlights"]
 
 

@@ -86,6 +86,12 @@ Here are the videos:
             result_text = response.text
             evaluations = json.loads(result_text)
 
+            def _to_score(value: Any) -> int:
+                try:
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return 0
+
             eval_map = {e["id"]: e for e in evaluations}
             passed_candidates = []
 
@@ -98,9 +104,9 @@ Here are the videos:
 
                     # Do not trust LLM strings, verify mathematically
                     max_rel = max(
-                        ev.get("keyword_relevance", 0),
-                        ev.get("topic_relevance", 0),
-                        ev.get("niche_relevance", 0),
+                        _to_score(ev.get("keyword_relevance", 0)),
+                        _to_score(ev.get("topic_relevance", 0)),
+                        _to_score(ev.get("niche_relevance", 0)),
                     )
 
                     if max_rel >= 50:

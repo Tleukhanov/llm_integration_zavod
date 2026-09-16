@@ -90,7 +90,7 @@ class YouTubeAPIClient:
             "part": "id",
             "type": "video",
             "publishedAfter": after_str,
-            "maxResults": 50,
+            "maxResults": max_results,
             "videoDuration": "medium",  # 4-20 minutes
             "videoEmbeddable": "true",
             "relevanceLanguage": "en",

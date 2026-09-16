@@ -1,7 +1,6 @@
 import sqlite3
 import threading
 import time
-from functools import lru_cache
 from pathlib import Path
 
 DB_PATH = Path("outputs/subtitle_cache.db")
@@ -11,34 +10,34 @@ _db_lock = threading.Lock()
 
 def _get_db():
     global _conn_pool
-    if _conn_pool is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # Use isolation_level=None for autocommit and avoid transaction deadlocks
-        _conn_pool = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
+    with _db_lock:
+        if _conn_pool is None:
+            DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            # Use isolation_level=None for autocommit and avoid transaction deadlocks
+            _conn_pool = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
 
-        # Performance and concurrency optimizations
-        _conn_pool.execute("PRAGMA journal_mode=WAL")
-        _conn_pool.execute("PRAGMA synchronous=NORMAL")
-        _conn_pool.execute("PRAGMA busy_timeout=5000")
+            # Performance and concurrency optimizations
+            _conn_pool.execute("PRAGMA journal_mode=WAL")
+            _conn_pool.execute("PRAGMA synchronous=NORMAL")
+            _conn_pool.execute("PRAGMA busy_timeout=5000")
 
-        _conn_pool.execute("""
-            CREATE TABLE IF NOT EXISTS subtitle_cache (
-                video_id      TEXT PRIMARY KEY,
-                status        TEXT,
-                language      TEXT,
-                checked_at    REAL,
-                expires_at    REAL
+            _conn_pool.execute("""
+                CREATE TABLE IF NOT EXISTS subtitle_cache (
+                    video_id      TEXT PRIMARY KEY,
+                    status        TEXT,
+                    language      TEXT,
+                    checked_at    REAL,
+                    expires_at    REAL
+                )
+            """)
+
+            # Create an index on expires_at to speed up purge_expired
+            _conn_pool.execute(
+                "CREATE INDEX IF NOT EXISTS idx_expires_at ON subtitle_cache(expires_at)"
             )
-        """)
-
-        # Create an index on expires_at to speed up purge_expired
-        _conn_pool.execute(
-            "CREATE INDEX IF NOT EXISTS idx_expires_at ON subtitle_cache(expires_at)"
-        )
     return _conn_pool
 
 
-@lru_cache(maxsize=2048)
 def get_status(video_id: str) -> str | None:
     conn = _get_db()
     with _db_lock:
@@ -78,7 +77,6 @@ def set_status(video_id: str, status: str, language: str = "en"):
             """,
             (video_id, status, language, now, expires_at),
         )
-    get_status.cache_clear()
 
 
 def purge_expired() -> int:
@@ -88,8 +86,5 @@ def purge_expired() -> int:
     with _db_lock:
         cur = conn.execute("DELETE FROM subtitle_cache WHERE expires_at <= ?", (now,))
         deleted_count = cur.rowcount
-
-    if deleted_count > 0:
-        get_status.cache_clear()
 
     return deleted_count
