@@ -164,7 +164,7 @@ Commands:
 | `OPENAI_API_KEY` | — | OpenAI API key (if using `openai` provider) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (if using `anthropic` provider) |
 
-> **Note:** The `.env.example` file in the repo is outdated. Use this table as the source of truth.
+> **Note:** The table above is the source of truth; `.env.example` mirrors it for quick setup.
 
 ## Example Output
 
