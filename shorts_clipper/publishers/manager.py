@@ -442,30 +442,44 @@ class PublishingEngine:
         signed_url = None
         r2_storage = None
 
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                r2_storage = R2Storage(settings)
-                if attempt > 1:
-                    log.info(f"☁️ Uploading to R2 (Attempt {attempt}/{self.max_retries})...")
-                r2_key = r2_storage.upload(video_path)
-                signed_url = r2_storage.generate_signed_url(r2_key, expires_in=3600)
-                break
-            except Exception as e:
-                log.warning(f"⚠️ R2 Upload attempt {attempt} failed: {e}")
-                if attempt < self.max_retries:
-                    wait_time = self.base_backoff**attempt
-                    log.info(f"⏳ Waiting {wait_time}s before retrying R2 upload...")
-                    time.sleep(wait_time)
-                else:
-                    log.error(f"❌ R2 Upload failed after {self.max_retries} attempts: {e}")
-                    for p in publishers:
-                        results[p] = PublishResult(
-                            platform=p,
-                            success=False,
-                            error_message=f"R2 Upload failed: {e}",
-                        )
-                    self._generate_manifest(video_path, metadata, results)
-                    return results
+        # Platforms that require a public/signed URL for media staging
+        url_required_platforms = {"instagram", "tiktok"}
+        platforms_needing_url = [p for p in publishers if p in url_required_platforms]
+
+        if platforms_needing_url:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    r2_storage = R2Storage(settings)
+                    if attempt > 1:
+                        log.info(f"☁️ Uploading to R2 (Attempt {attempt}/{self.max_retries})...")
+                    r2_key = r2_storage.upload(video_path)
+                    signed_url = r2_storage.generate_signed_url(r2_key, expires_in=3600)
+                    break
+                except Exception as e:
+                    log.warning(f"⚠️ R2 Upload attempt {attempt} failed: {e}")
+                    if attempt < self.max_retries:
+                        wait_time = self.base_backoff**attempt
+                        log.info(f"⏳ Waiting {wait_time}s before retrying R2 upload...")
+                        time.sleep(wait_time)
+                    else:
+                        log.error(f"❌ R2 Upload failed after {self.max_retries} attempts: {e}")
+                        for p in platforms_needing_url:
+                            results[p] = PublishResult(
+                                platform=p,
+                                success=False,
+                                error_message=f"R2 Upload failed: {e}",
+                            )
+                        publishers = {
+                            p: pub for p, pub in publishers.items() if p not in platforms_needing_url
+                        }
+                        if not publishers:
+                            self._generate_manifest(video_path, metadata, results)
+                            return results
+                        signed_url = None
+        else:
+            log.info(
+                "No platform requires a public URL for this run; skipping R2 media staging upload."
+            )
 
         def publish_to_platform(platform_name: str, publisher) -> PublishResult:
             result = None

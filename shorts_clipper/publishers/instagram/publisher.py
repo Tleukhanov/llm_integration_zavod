@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
@@ -118,7 +118,7 @@ class InstagramGraphPublisher(Publisher):
                 success=True,
                 url=f"https://www.instagram.com/reel/{published_id}/" if published_id else None,
                 platform_id=published_id,
-                published_at=datetime.utcnow().isoformat() + "Z",
+                published_at=datetime.now(UTC).isoformat() + "Z",
             )
 
         except ConfigurationError:

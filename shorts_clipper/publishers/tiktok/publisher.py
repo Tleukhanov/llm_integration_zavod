@@ -69,10 +69,10 @@ def _request_json(
             if e.code in (401, 403):
                 raise ConfigurationError(
                     f"TikTok API rejected the access token (status {e.code}): {detail}"
-                )
+                ) from e
             raise RuntimeError(
                 f"TikTok API {method} {url} failed with status {e.code}: {detail}"
-            )
+            ) from e
         if not body:
             return {}
         return json.loads(body)
@@ -99,7 +99,7 @@ class TikTokPublisher(Publisher):
             )
         try:
             headers = {"Authorization": f"Bearer {access_token}"}
-            data = _request_json("GET", _CREATOR_INFO_URL, headers, timeout=30)
+            _request_json("GET", _CREATOR_INFO_URL, headers, timeout=30)
             log.info("TikTok credentials verified via creator info endpoint.")
         except ConfigurationError:
             raise

@@ -849,8 +849,8 @@ class GeminiProvider(HighlightProvider):
         )
 
     def generate_content(
-        self, contents: any, max_retries: int = 5, initial_delay: float = 5.0, **kwargs
-    ) -> any:
+        self, contents: Any, max_retries: int = 5, initial_delay: float = 5.0, **kwargs
+    ) -> Any:
         """Call generate_content with exponential backoff on transient errors."""
         import time
 

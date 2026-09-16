@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..base import Publisher
@@ -46,7 +46,7 @@ class YouTubePublisher(Publisher):
                 success=True,
                 url=f"https://youtube.com/shorts/{video_id}" if video_id else None,
                 platform_id=video_id,
-                published_at=datetime.utcnow().isoformat() + "Z",
+                published_at=datetime.now(UTC).isoformat() + "Z",
             )
         except PublishValidationError as e:
             log.error(f"YouTube publishing failed: {e}")

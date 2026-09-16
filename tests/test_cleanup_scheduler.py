@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from shorts_clipper.core.cleanup import run_cleanup, should_move_to_archive
@@ -29,7 +29,7 @@ def _write(path: Path) -> None:
 
 
 def _age(path: Path, days: float) -> None:
-    ts = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    ts = (datetime.now(UTC) - timedelta(days=days)).timestamp()
     os.utime(path, (ts, ts))
 
 
@@ -105,7 +105,7 @@ def test_run_cleanup_deletes_excess_oldest_first(tmp_path):
     out = Path(settings.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    base = datetime.now(timezone.utc) - timedelta(seconds=1000)
+    base = datetime.now(UTC) - timedelta(seconds=1000)
     for i in range(4):
         clip = out / f"rendered_clip_{i}.mp4"
         _write(clip)
@@ -127,7 +127,7 @@ def test_run_cleanup_missing_output_dir(tmp_path):
 def test_scheduler_queue_pending_until_due(tmp_path, monkeypatch):
     monkeypatch.setenv("SHORTS_CACHE_DIR", str(tmp_path / "cache"))
 
-    future_iso = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    future_iso = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     entry_path = enqueue_publish(
         str(tmp_path / "clip.mp4"), {"title": "t"}, ["youtube"], future_iso
     )
@@ -139,7 +139,7 @@ def test_scheduler_queue_pending_until_due(tmp_path, monkeypatch):
 
     assert get_due_publish_entries() == []
 
-    later = datetime.now(timezone.utc) + timedelta(hours=2)
+    later = datetime.now(UTC) + timedelta(hours=2)
     due = get_due_publish_entries(now=later)
     assert len(due) == 1
     assert due[0]["status"] == "queued"
@@ -156,7 +156,7 @@ def test_enqueue_immediate_is_due(tmp_path, monkeypatch):
     assert data["status"] == "queued"
     assert data["publish_at"]
 
-    due = get_due_publish_entries(now=datetime.now(timezone.utc))
+    due = get_due_publish_entries(now=datetime.now(UTC))
     assert [d["queue_file"] for d in due] == [str(entry_path)]
 
 
