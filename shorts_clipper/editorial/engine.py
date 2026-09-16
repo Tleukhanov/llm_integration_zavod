@@ -91,7 +91,7 @@ class EditorialEngine:
         """Evaluates a single window across all pipeline stages."""
         if not segments:
             return EditorialDecision(
-                clip_window=ClipWindow(start=0.0, end=0.0),
+                clip_window=ClipWindow(start=0.0, end=1.0),
                 final_score=0.0,
                 confidence=0.0,
                 reasoning="Empty window",
@@ -103,7 +103,20 @@ class EditorialEngine:
         clip_window = ClipWindow(start=start_time, end=end_time)
 
         # Stage 1: Feature Extraction
-        features = FeatureStore.compute(segments)
+        try:
+            features = FeatureStore.compute(segments)
+        except Exception as e:
+            log.error(
+                f"Feature extraction failed for window [{start_time:.2f}-{end_time:.2f}]: {e}",
+                exc_info=True,
+            )
+            return EditorialDecision(
+                clip_window=clip_window,
+                final_score=0.0,
+                confidence=0.0,
+                reasoning=f"Feature extraction failed: {e}",
+                rejected=True,
+            )
 
         # Stage 2: Scoring
         results: dict[str, JudgeResult] = {}

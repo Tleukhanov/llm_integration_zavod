@@ -31,10 +31,16 @@ class HookJudge(EditorialJudge):
         # Get the first 5 seconds of transcript text
         start_time = features.raw_segments[0].start
         hook_text_parts = []
+        hook_words = []
         for s in features.raw_segments:
             if s.end <= start_time + 5.0:
                 hook_text_parts.append(s.text.strip())
+                hook_words.extend(s.words)
             else:
+                # Include partially-overlapping segment's first-5s portion text
+                if s.start < start_time + 5.0:
+                    hook_text_parts.append(s.text.strip())
+                    hook_words.extend(s.words)
                 break
 
         hook_text = " ".join(hook_text_parts).lower()
@@ -52,8 +58,13 @@ class HookJudge(EditorialJudge):
             score += 30.0
             reasoning.append("Poses an immediate question.")
 
-        # Check energy (words per second in the first 5 seconds)
-        if features.words_per_second > 2.5:
+        # Check energy (words per second in the first 5 seconds, not the whole clip)
+        hook_duration = min(5.0, features.total_duration if features.total_duration > 0 else 5.0)
+        if hook_words:
+            opening_wps = len(hook_words) / hook_duration if hook_duration > 0 else 0.0
+        else:
+            opening_wps = len(hook_text.split()) / hook_duration if hook_duration > 0 else 0.0
+        if opening_wps > 2.5:
             score += 20.0
             reasoning.append("High energy start.")
 

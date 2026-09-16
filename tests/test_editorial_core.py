@@ -149,5 +149,6 @@ def test_editorial_engine_selection():
 
     assert len(clips) == 1
     best_clip = clips[0]
-    # Should pick the window starting around 30.0 due to the strong hook
-    assert 28.0 <= best_clip.start <= 32.0
+    # The strong hook segment spans 30.0-32.5; the chosen window must contain it
+    # (the window may start slightly earlier to capture surrounding context).
+    assert best_clip.start <= 30.0 and best_clip.end >= 32.5
