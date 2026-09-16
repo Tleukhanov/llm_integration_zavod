@@ -16,8 +16,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.cleanup import cleanup_worker
+from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.queue import JobQueue, JobStatus
 from shorts_clipper.core.scheduler import publish_scheduler_loop
 from shorts_clipper.core.settings import Settings

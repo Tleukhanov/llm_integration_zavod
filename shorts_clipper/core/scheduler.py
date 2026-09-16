@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from shorts_clipper.core.settings import Settings
@@ -33,7 +33,7 @@ def enqueue_publish(
 ) -> Path:
     """Write a publish job to the queue and return the queue file path."""
     settings = Settings.from_env()
-    publish_at = publish_at_iso or datetime.now(timezone.utc).isoformat()
+    publish_at = publish_at_iso or datetime.now(UTC).isoformat()
     entry = {
         "path": str(path_s),
         "metadata": metadata,
@@ -42,7 +42,7 @@ def enqueue_publish(
         "status": "queued",
         "attempts": 0,
     }
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     path = _queue_dir(settings) / f"queued_publish_{ts}.json"
     path.write_text(json.dumps(entry, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info("Enqueued scheduled publish for %s at %s", path_s, publish_at)
@@ -53,13 +53,13 @@ def _parse_publish_at(value: str) -> datetime:
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def get_due_publish_entries(now: datetime | None = None) -> list[dict]:
     """Return queued entries whose publish time has arrived."""
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     settings = Settings.from_env()
     due: list[dict] = []
     for queue_file in sorted(_queue_dir(settings).glob("queued_publish_*.json")):

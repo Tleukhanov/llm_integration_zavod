@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ class RunContext:
         return cls._instance
 
     def reset(self):
-        self.run_id = datetime.utcnow().strftime("run_%Y%m%d_%H%M%S")
+        self.run_id = datetime.now(UTC).strftime("run_%Y%m%d_%H%M%S")
         self.decision_trace = {}
         self.attention_reports = {}
         self.variant_reports = []

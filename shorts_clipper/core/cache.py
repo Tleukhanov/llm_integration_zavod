@@ -31,13 +31,20 @@ def _ensure_table(con: sqlite3.Connection):
     """)
 
 
+def _connect() -> sqlite3.Connection:
+    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=5000")
+    return con
+
+
 def get_cached(video_id: str) -> dict | None:
     with _lock:
         try:
-            _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             import contextlib
 
-            with contextlib.closing(sqlite3.connect(_DB_PATH, check_same_thread=False)) as con:
+            with contextlib.closing(_connect()) as con:
                 _ensure_table(con)
                 row = con.execute(
                     "SELECT metadata_json, cached_at, ttl_hours FROM metadata_cache WHERE video_id = ?",
@@ -66,10 +73,9 @@ def set_cached(video_id: str, metadata: dict, ttl_hours: int = 6) -> None:
     }
     with _lock:
         try:
-            _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             import contextlib
 
-            with contextlib.closing(sqlite3.connect(_DB_PATH, check_same_thread=False)) as con:
+            with contextlib.closing(_connect()) as con:
                 _ensure_table(con)
                 con.execute(
                     """INSERT OR REPLACE INTO metadata_cache
@@ -86,10 +92,9 @@ def purge_expired() -> int:
     """Delete expired cache entries. Returns count deleted."""
     with _lock:
         try:
-            _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             import contextlib
 
-            with contextlib.closing(sqlite3.connect(_DB_PATH, check_same_thread=False)) as con:
+            with contextlib.closing(_connect()) as con:
                 _ensure_table(con)
                 cur = con.execute(
                     """DELETE FROM metadata_cache

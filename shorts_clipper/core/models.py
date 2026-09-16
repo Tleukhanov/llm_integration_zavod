@@ -77,6 +77,9 @@ class HighlightScore:
             + self.topic
             + self.speaker_emphasis
             + self.caption_density
+            + self.hook_strength
+            + self.pacing_score
+            + self.replayability_score
         )
 
 

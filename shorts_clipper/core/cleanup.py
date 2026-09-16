@@ -12,7 +12,7 @@ import os
 import re
 import shutil
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from shorts_clipper.core.settings import Settings
@@ -118,7 +118,7 @@ def run_cleanup(settings: Settings) -> dict[str, int]:
         log.error("Failed to create archive dir %s: %s", archive_dir, e)
         return counts
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     retention_seconds = settings.clip_retention_days * 86400
 
     # (a) Move successfully published media to the archive, grouped per clip.
