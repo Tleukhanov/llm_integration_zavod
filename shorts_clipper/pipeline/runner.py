@@ -906,7 +906,7 @@ def run(
                 # Append the affiliate offer before the sidecar write
                 if affiliate_partner is not None:
                     try:
-                        partner_language = str((meta.get("language") or "en"))
+                        partner_language = str(meta.get("language") or "en")
                         meta["description"] = build_affiliate_description(
                             meta, affiliate_partner, partner_language
                         )

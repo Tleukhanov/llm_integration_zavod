@@ -482,9 +482,26 @@ def stream_render_pipeline(
         if yt_proc.stdout:
             yt_proc.stdout.close()
 
+        # Drain yt-dlp stderr in a background thread to avoid pipe buffer deadlock
+        # while ffmpeg is still running.
+        import threading
+
+        yt_stderr_buf: list[bytes] = []
+
+        def _drain_yt_stderr() -> None:
+            try:
+                data = yt_proc.stderr.read() if yt_proc.stderr else b""
+                yt_stderr_buf.append(data)
+            except Exception:
+                pass
+
+        drain_thread = threading.Thread(target=_drain_yt_stderr, daemon=True)
+        drain_thread.start()
+
         try:
             ffmpeg_out, ffmpeg_errs = ffmpeg_proc.communicate(timeout=600)
             yt_out, yt_errs = yt_proc.communicate(timeout=60)
+            drain_thread.join(timeout=5)
         except subprocess.TimeoutExpired:
             log.error("Stream pipeline timed out! Killing yt-dlp and ffmpeg processes...")
             yt_proc.kill()
@@ -492,6 +509,8 @@ def stream_render_pipeline(
             yt_proc.communicate()
             ffmpeg_proc.communicate()
             raise RuntimeError("Stream render pipeline timed out after 600 seconds.") from None
+
+        yt_errs = b"".join(yt_stderr_buf) if yt_stderr_buf else (yt_errs or b"")
 
         if yt_proc.returncode != 0:
             yt_err_msg = yt_errs.decode(errors="ignore").strip()

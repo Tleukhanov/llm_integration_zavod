@@ -110,6 +110,8 @@ def build_vertical_render_command(
         [
             "-c:a",
             opts.audio_codec,
+            "-pix_fmt",
+            "yuv420p",
             "-movflags",
             "+faststart",
         ]
