@@ -65,7 +65,7 @@ class SelectEmotionWindowsTests(unittest.TestCase):
             emotion, 1.0, min_length=1.0, max_length=3.0, top_n=5, threshold=0.35,
         )
         windows.sort(key=lambda w: w.start)
-        for a, b in zip(windows, windows[1:]):
+        for a, b in zip(windows, windows[1:], strict=False):
             self.assertLessEqual(a.end, b.start + 1e-6)
 
     def test_empty_emotion_returns_empty(self):
@@ -325,8 +325,8 @@ class RunnerRoutingTests(unittest.TestCase):
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
             mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.95)]
-            from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
+            from shorts_clipper.pipeline import runner as r
             with self.assertRaises(MediaProcessingError):
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(gameplay_clutch_mode="energy"),
@@ -346,8 +346,8 @@ class RunnerRoutingTests(unittest.TestCase):
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa, \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
             mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.85)]
-            from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
+            from shorts_clipper.pipeline import runner as r
             with self.assertRaises(MediaProcessingError):
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(gameplay_clutch_mode="emotion"),
@@ -368,8 +368,8 @@ class RunnerRoutingTests(unittest.TestCase):
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
             mock_emo.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.85)]
-            from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
+            from shorts_clipper.pipeline import runner as r
             with self.assertRaises(MediaProcessingError):
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(gameplay_clutch_mode="emotion"),
@@ -391,8 +391,8 @@ class RunnerRoutingTests(unittest.TestCase):
              mocks["vertical"], mocks["transcribe"], \
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
             mock_wfa.return_value = [(mock.Mock(start=10.0, end=40.0), 20.0, 0.95)]
-            from shorts_clipper.pipeline import runner as r
             from shorts_clipper.core.exceptions import MediaProcessingError
+            from shorts_clipper.pipeline import runner as r
             with self.assertRaises(MediaProcessingError):
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(gameplay_clutch_mode="energy"),
@@ -428,7 +428,7 @@ class RunnerRoutingTests(unittest.TestCase):
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
             mock_wfa.return_value = mock_return
             from shorts_clipper.pipeline import runner as r
-            with self.assertRaises(Exception):
+            with self.assertRaises(Exception):  # noqa: B017
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(
                           gameplay_clutch_mode="energy",
@@ -473,7 +473,7 @@ class RunnerRoutingTests(unittest.TestCase):
              mock.patch("shorts_clipper.attention.emotion.windows_and_peaks_from_audio") as mock_emo:
             mock_emo.return_value = mock_return
             from shorts_clipper.pipeline import runner as r
-            with self.assertRaises(Exception):
+            with self.assertRaises(Exception):  # noqa: B017
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(
                           gameplay_clutch_mode="emotion",
@@ -514,7 +514,7 @@ class RunnerRoutingTests(unittest.TestCase):
              mock.patch("shorts_clipper.attention.gameplay.windows_and_peaks_from_audio") as mock_wfa:
             mock_wfa.return_value = mock_return
             from shorts_clipper.pipeline import runner as r
-            with self.assertRaises(Exception):
+            with self.assertRaises(Exception):  # noqa: B017
                 r.run("https://www.youtube.com/watch?v=abc123abc12",
                       settings=self._base_settings(
                           gameplay_clutch_mode="energy",

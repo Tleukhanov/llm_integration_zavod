@@ -14,7 +14,6 @@ from pathlib import Path
 import numpy as np
 
 from shorts_clipper.attention.audio_energy import extract_audio_energy
-from shorts_clipper.attention.emotion import cluster_peaks
 from shorts_clipper.core.models import ClipWindow
 
 
@@ -175,7 +174,7 @@ def windows_and_peaks_from_audio(
             ClipWindow(start=w.start, end=min(w.end, total_seconds)) for w in windows
         ]
     peak_data = _cluster_peaks_with_magnitudes(energy, windows)
-    return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data)]
+    return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data, strict=True)]
 
 
 def windows_from_audio(

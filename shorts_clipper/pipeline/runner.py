@@ -33,9 +33,9 @@ from shorts_clipper.affiliate import (
 from shorts_clipper.captions.generator import burn_subtitles
 from shorts_clipper.captions.music import pick_track, should_use_bgm
 from shorts_clipper.core.exceptions import (
-    MediaProcessingError,
     SUBTITLE_NOT_AVAILABLE,
     YOUTUBE_RATE_LIMIT_429,
+    MediaProcessingError,
 )
 from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.settings import Settings
@@ -301,7 +301,9 @@ def run(
 
                     from shorts_clipper.attention.engine import SimulationEngine
                     from shorts_clipper.core.models import ClipWindow
-                    from shorts_clipper.highlight_detection.scoring import SemanticCandidateGenerator
+                    from shorts_clipper.highlight_detection.scoring import (
+                        SemanticCandidateGenerator,
+                    )
 
                     try:
                         log.info("Generating semantic candidates")

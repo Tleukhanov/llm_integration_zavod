@@ -1,5 +1,6 @@
 import json
 import unittest
+from subprocess import TimeoutExpired
 from unittest import mock
 
 from shorts_clipper.downloader.yt_dlp import search_cc_videos
@@ -68,8 +69,6 @@ class SearchCCVideosTests(unittest.TestCase):
         self.assertIn("--dateafter", cmd)
         self.assertIn("20250101", cmd)
 
-
-from subprocess import TimeoutExpired
 
 if __name__ == "__main__":
     unittest.main()

@@ -122,6 +122,7 @@ class GamePlaySettingsClipMinSeparationTests(unittest.TestCase):
 
     def test_env_parse(self):
         import os
+
         from shorts_clipper.core.settings import Settings
         os.environ["SHORTS_CLIP_MIN_SEPARATION"] = "25.0"
         try:

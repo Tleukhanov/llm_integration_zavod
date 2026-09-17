@@ -8,7 +8,7 @@ TTL default: 6 hours. Configurable per call.
 import json
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 _lock = threading.Lock()
@@ -17,7 +17,7 @@ _DB_PATH = Path("outputs/jobs.db")
 
 def _utc_now_iso() -> str:
     """UTC-naive ISO timestamp — SQLite ``datetime('now')`` is also UTC."""
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    return datetime.now(UTC).replace(tzinfo=None).isoformat()
 
 
 def _ensure_table(con: sqlite3.Connection):
@@ -54,7 +54,7 @@ def get_cached(video_id: str) -> dict | None:
                     return None
                 metadata_json, cached_at, ttl_hours = row
                 cached_dt = datetime.fromisoformat(cached_at)
-                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                now_utc = datetime.now(UTC).replace(tzinfo=None)
                 if now_utc > cached_dt + timedelta(hours=ttl_hours):
                     con.execute("DELETE FROM metadata_cache WHERE video_id = ?", (video_id,))
                     con.commit()

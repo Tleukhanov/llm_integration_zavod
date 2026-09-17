@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +14,6 @@ from shorts_clipper.highlight_detection.hook_judge import (
     _parse_verdict,
     auto_threshold,
 )
-
 
 # ---------------------------------------------------------------------------
 # _parse_verdict tests

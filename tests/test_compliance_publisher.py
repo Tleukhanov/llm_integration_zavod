@@ -2,7 +2,12 @@ import pytest
 
 from shorts_clipper.compliance.gate import ComplianceBlocked
 from shorts_clipper.core.settings import Settings
-from shorts_clipper.publishers import ClipMetadata, PublisherRegistry, PublishingEngine, PublishResult
+from shorts_clipper.publishers import (
+    ClipMetadata,
+    PublisherRegistry,
+    PublishingEngine,
+    PublishResult,
+)
 from shorts_clipper.publishers.base import Publisher
 
 

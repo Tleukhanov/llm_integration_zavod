@@ -31,7 +31,7 @@ def _write_small_wav(path: Path, nframes: int = 44100 * 2, samprate: int = 44100
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(samprate)
-        w.writeframes(struct.pack("<%dh" % nframes, *([0] * nframes)))
+        w.writeframes(struct.pack(f"<{nframes}h", *([0] * nframes)))
     return nframes / samprate
 
 

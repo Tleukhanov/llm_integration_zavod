@@ -153,7 +153,7 @@ class HookJudge:
             raw_text = response.text
         except Exception as exc:
             log.warning("Hook judge LLM call failed: %s", exc)
-            return HookVerdict(0.5, f"llm unavailable — neutral", True)
+            return HookVerdict(0.5, "llm unavailable — neutral", True)
 
         parsed = _parse_verdict(raw_text)
         score = parsed["score"]

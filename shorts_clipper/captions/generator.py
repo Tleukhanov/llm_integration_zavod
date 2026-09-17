@@ -514,7 +514,8 @@ def burn_subtitles(
         fontfile = "C:/Windows/Fonts/arialbd.ttf"
         font_arg = ""
         if Path("C:/Windows/Fonts/arialbd.ttf").exists():
-            font_arg = f"fontfile='{fontfile.replace(':', '\\:')}':"
+            escaped_fontfile = fontfile.replace(":", "\\:")
+            font_arg = f"fontfile='{escaped_fontfile}':"
 
         # Mid-roll ad card window; None => until end of clip (per-frame check)
         if ad_card_duration is not None:

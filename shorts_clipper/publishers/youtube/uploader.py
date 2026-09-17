@@ -3,9 +3,8 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from .auth import get_youtube_service
-
 from ..models import PublishValidationError
+from .auth import get_youtube_service
 
 log = logging.getLogger(__name__)
 

@@ -2,9 +2,9 @@
 import os
 import unittest
 
-from shorts_clipper.cropping.geometry import compute_center_crop
-from shorts_clipper.rendering.crop import _build_wide_crop_filter, _WIDE_W, _WIDE_H
 from shorts_clipper.core.settings import Settings
+from shorts_clipper.cropping.geometry import compute_center_crop
+from shorts_clipper.rendering.crop import _WIDE_H, _WIDE_W, _build_wide_crop_filter
 
 
 class WideCropFilterTests(unittest.TestCase):
@@ -34,7 +34,6 @@ class WideCropFilterTests(unittest.TestCase):
         vf = _build_wide_crop_filter(1080, 1920, "crop_right")
         self.assertIn(f"crop={_WIDE_W}:{_WIDE_H}", vf)
         self.assertIn("setsar=1", vf)
-        parts = f"crop={_WIDE_W}:{_WIDE_H}:".split()
         self.assertIn("crop=", vf)
 
     def test_wide_filter_720p_source(self):

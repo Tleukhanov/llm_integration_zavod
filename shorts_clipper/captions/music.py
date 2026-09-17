@@ -103,10 +103,10 @@ def _wav_duration(path: Path) -> float | None:
 
 
 def _ffmpeg_duration(path: Path) -> float | None:
-    from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
-
     import re
     import subprocess
+
+    from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 
     cmd = [ffmpeg_path(), "-i", str(path)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -134,7 +134,7 @@ def pick_track(
     tracks = list_tracks(music_dir)
     if not tracks:
         return None
-    if not os.getenv("SHORTS_ALLOW_PROCEDURAL_MUSIC", "0").lower() in ("1", "true", "on"):
+    if os.getenv("SHORTS_ALLOW_PROCEDURAL_MUSIC", "0").lower() not in ("1", "true", "on"):
         tracks = [
             t for t in tracks
             if not t.name.startswith("generated_phonk_loop")

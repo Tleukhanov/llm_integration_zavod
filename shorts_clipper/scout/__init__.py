@@ -1,3 +1,3 @@
 """Trending video scout package."""
 
-from shorts_clipper.scout.auto_batch import auto_discover
+from shorts_clipper.scout.auto_batch import auto_discover as auto_discover

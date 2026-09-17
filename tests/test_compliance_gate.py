@@ -1,4 +1,3 @@
-import pytest
 
 from shorts_clipper.compliance.gate import ComplianceGate, ComplianceVerdict
 from shorts_clipper.core.settings import Settings

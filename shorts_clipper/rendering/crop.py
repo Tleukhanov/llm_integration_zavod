@@ -165,7 +165,6 @@ def _build_wide_crop_filter(
 ) -> str:
     """Return an FFmpeg -vf string for a 16:9 (1920×1080) wide crop."""
     src_ratio = src_w / src_h
-    target_ratio = _WIDE_W / _WIDE_H
 
     if layout == "crop_left":
         scale_h = _WIDE_H

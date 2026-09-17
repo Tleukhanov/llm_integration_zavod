@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class ProcessedStore:
             self._data[video_id] = {
                 "url": url,
                 "title": title,
-                "processed_at": (when or datetime.now(timezone.utc)).isoformat(),
+                "processed_at": (when or datetime.now(UTC)).isoformat(),
             }
             self._save()
             return True

@@ -195,7 +195,7 @@ class CacheResolveTests(TmpTestCase):
                 json.dumps({"complete": True}), encoding="utf-8"
             )
 
-            result = yt_dlp.download_audio(VID_URL, out)
+            yt_dlp.download_audio(VID_URL, out)
             mock_run.assert_not_called()
             self.assertEqual(out.read_bytes(), b"CACHED_WEBM_AUDIO")
 

@@ -89,7 +89,7 @@ class SelectEnergyWindowsTests(unittest.TestCase):
             threshold=0.35,
         )
         windows.sort(key=lambda w: w.start)
-        for a, b in zip(windows, windows[1:]):
+        for a, b in zip(windows, windows[1:], strict=False):
             self.assertLessEqual(a.end, b.start + 1e-6)
 
     def test_empty_energy_returns_empty(self):

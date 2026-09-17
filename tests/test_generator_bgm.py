@@ -123,7 +123,7 @@ class BurnSubtitleBgmTests(unittest.TestCase):
             return R()
 
         with mock.patch("shorts_clipper.captions.generator.subprocess.run", fake_run):
-            r = burn_subtitles(
+            burn_subtitles(
                 self.video,
                 self.segments,
                 start_offset=0.0,

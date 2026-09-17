@@ -3,6 +3,7 @@
 import contextlib
 import tempfile
 import unittest
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import patch
 
@@ -116,7 +117,7 @@ class ScoutCacheTests(unittest.TestCase):
     def test_ttl_expiry_and_purge(self):
         """Verify TTL is enforced consistently (all timestamps are UTC)."""
         import sqlite3
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "jobs.db"
@@ -131,7 +132,7 @@ class ScoutCacheTests(unittest.TestCase):
 
                 # purge_expired: write a row with cached_at set 72h ago UTC, ttl=1h
                 utc_72h_ago = (
-                    datetime.now(timezone.utc) - timedelta(hours=72)
+                    datetime.now(UTC) - timedelta(hours=72)
                 ).replace(tzinfo=None).isoformat()
                 with contextlib.closing(sqlite3.connect(db_path)) as con:
                     con.execute(

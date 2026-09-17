@@ -155,7 +155,6 @@ class PickTrackTests(unittest.TestCase):
 
 class SettingsBgmTests(unittest.TestCase):
     def _load(self, env_text: str):
-        from shorts_clipper.core.settings import Settings
 
         file_values = {}
         for line in env_text.splitlines():
@@ -187,8 +186,9 @@ class SettingsBgmTests(unittest.TestCase):
         self.assertEqual(_env("SHORTS_BGM_VOLUME", fv, "0.30") or "0.30", "0.50")
 
     def test_constructs_settings_rows(self):
-        from shorts_clipper.core.settings import Settings
         from pathlib import Path
+
+        from shorts_clipper.core.settings import Settings
 
         s = Settings.from_env("nonexistent.env")
         self.assertEqual(s.bgm_mode, "off")

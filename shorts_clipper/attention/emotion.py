@@ -414,7 +414,7 @@ def windows_and_peaks_from_audio(
         k_list = energy[:n] if energy else [0.0] * n
 
         # Blend: emotion-weighted score for clutch detection.
-        blended = [0.6 * e + 0.4 * k for e, k in zip(e_list, k_list)]
+        blended = [0.6 * e + 0.4 * k for e, k in zip(e_list, k_list, strict=True)]
 
         # Normalise blended to [0, 1].
         mx = max(blended) if blended else 0.0
@@ -437,7 +437,7 @@ def windows_and_peaks_from_audio(
                 for w in windows
             ]
         peak_data = _cluster_peaks_with_magnitudes(blended, windows)
-        return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data)]
+        return [(w, pd[0], pd[1]) for w, pd in zip(windows, peak_data, strict=True)]
     except Exception as exc:
         log.warning("Emotion window selection failed for %s: %s", audio_path, exc)
         return []
