@@ -249,6 +249,12 @@ def _cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:  # noqa: A
     return run_doctor(settings)
 
 
+def _cmd_retention_report(args: argparse.Namespace, settings: Settings) -> int:
+    from shorts_clipper.cli.retention_report import run_retention_report
+
+    return run_retention_report(settings, args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m shorts_clipper",
@@ -405,6 +411,35 @@ def build_parser() -> argparse.ArgumentParser:
     # ── doctor ─────────────────────────────────────────────────────────────────────────
     sub.add_parser("doctor", help="Check local environment and setup readiness.")
 
+    # ── retention-report ──────────────────────────────────────────────────────────────────
+    retention_p = sub.add_parser(
+        "retention-report",
+        help="Decision-science retention report per platform/niche from the metrics DB.",
+    )
+    retention_p.add_argument(
+        "--platform",
+        default=None,
+        help="Only report rows for this platform (default: all).",
+    )
+    retention_p.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Lookback window in days for published clips (default: 30).",
+    )
+    retention_p.add_argument(
+        "--niche",
+        default=None,
+        help="Only report rows for this niche (default: all).",
+    )
+    retention_p.add_argument(
+        "--out",
+        metavar="PATH",
+        default=None,
+        help="Path to the JSON report; the Markdown report is written next to it "
+             "(default: outputs/retention_report.json).",
+    )
+
     return parser
 
 
@@ -427,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         "repair-metadata": _cmd_repair_metadata,
         "cleanup": _cmd_cleanup,
         "doctor": _cmd_doctor,
+        "retention-report": _cmd_retention_report,
     }
     return dispatch[args.command](args, settings)
 

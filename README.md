@@ -150,7 +150,37 @@ Commands:
     --port INT           Port (default: 8000)
 
   repair-metadata      Backfill missing metadata on existing clips
+
+  retention-report     Decision-science retention report per platform/niche
+    --platform TEXT     Filter to one platform (default: all)
+    --days INT          Lookback window in days for published clips (default: 30)
+    --niche TEXT        Filter to one niche (default: all)
+    --out PATH          JSON report path; the Markdown report is written next
+                        to it (default: outputs/retention_report.json)
 ```
+
+## Retention report (decision science)
+
+`shorts-clipper retention-report` reads the metrics store (`SHORTS_METRICS_PATH`)
+and aggregates every produced clip per `(platform, niche)` into a deterministic
+JSON + Markdown report (`outputs/retention_report.json` / `.md` by default), so
+you can see whether the algorithm's hook / attention-window / energy-threshold
+decisions actually produce watchable clips:
+
+- per-row counters: `clips`, `published`, `publish_rate`
+- view/like/comment totals and medians (from the `clips` table columns)
+- `avg_hook_score` / `avg_energy` when those scoring columns exist in the schema
+  (older schemas report `not_available` instead of failing)
+- a `retention_grade` **A/B/C/D** where
+  `engagement = median(likes + comments) / median(views)` over rows with
+  `views > 0`, `retention_score = publish_rate × engagement` (falling back to
+  `publish_rate` alone when no row has views), graded `A ≥ 0.75`, `B ≥ 0.50`,
+  `C ≥ 0.25`, else `D`; the exact formula is embedded in the JSON `schema` block
+  and the Markdown "Methodology" footer.
+
+Rows are sorted by (platform, niche), then retention grade best-first. A missing
+metrics DB, an empty store, or a filter that matches nothing exits non-zero with
+a friendly message and leaves no report behind.
 
 ## Environment Variables
 
@@ -270,7 +300,7 @@ shorts_clipper/
 ├── transcription/          # faster-whisper integration
 ├── ui/                     # Static HTML/CSS/JS for web dashboard
 └── utils/                  # Video utilities
-tests/                      # 542 tests
+tests/                      # 557 tests
 ```
 
 ## Known Limitations
@@ -318,7 +348,7 @@ python -m pytest tests/ -v
 ruff check . && ruff format --check .
 ```
 
-542 tests, all passing.
+557 tests, all passing.
 
 ## Contributing
 
