@@ -7,6 +7,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Web console port (uvicorn in docker-compose binds 0.0.0.0:8000)
+EXPOSE 8000
+
 # Install Python dependencies first (layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
