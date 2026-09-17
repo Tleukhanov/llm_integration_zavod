@@ -9,6 +9,8 @@ Examples:
     python -m shorts_clipper clip https://youtu.be/xyz --output ./clips/
     python -m shorts_clipper autopilot --log-level DEBUG
     python -m shorts_clipper scout --count 3
+    python -m shorts_clipper clip --source URL1 URL2 --continue-on-error
+    python -m shorts_clipper autopilot --batch-file sources.txt
 """
 
 from __future__ import annotations
@@ -22,9 +24,95 @@ from shorts_clipper.core.logging import configure_logging
 from shorts_clipper.core.settings import Settings
 
 
+def _resolve_sources(args: argparse.Namespace) -> list[str]:
+    """Explicit sources from ``--source`` / ``--batch-file`` / positional URL.
+
+    ``--source`` wins over ``--batch-file``, which wins over the positional
+    ``url``. ``--source`` value(s) may carry comma-separated URLs; the batch
+    file holds one source per line with ``#`` comment lines allowed.
+    Returns an empty list when no source is given.
+    """
+    sourced = getattr(args, "source", None)
+    if sourced:
+        tokens = sourced if isinstance(sourced, (list, tuple)) else [sourced]
+        return [s.strip() for token in tokens for s in str(token).split(",") if s.strip()]
+
+    batch_file = getattr(args, "batch_file", None)
+    if batch_file:
+        text = Path(batch_file).read_text(encoding="utf-8")
+        return [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+    url = getattr(args, "url", None)
+    if url:
+        return [str(url).strip()]
+    return []
+
+
+def _cmd_batch(
+    args: argparse.Namespace,
+    settings: Settings,
+    sources: list[str],
+) -> int:
+    """Run the pipeline once per explicit source and report per-source outcomes."""
+    from shorts_clipper.pipeline.runner import BatchRunError, run_batch
+
+    upload = getattr(args, "upload", False)
+    count = getattr(args, "count", 1)
+    niche = getattr(args, "niche", None)
+    continue_on_error = getattr(args, "continue_on_error", False)
+
+    print(f"🚀 BATCH START: {len(sources)} source(s) (fail-fast={not continue_on_error})")
+    try:
+        result = run_batch(
+            sources,
+            settings=settings,
+            count=count,
+            upload=upload,
+            niche=niche,
+            continue_on_error=continue_on_error,
+        )
+    except BatchRunError as exc:
+        print(f"❌ BATCH ABORTED — {exc}")
+        return 1
+
+    for r in result.results:
+        if r.ok:
+            n = 0
+            if r.outputs:
+                n = len(r.outputs) if isinstance(r.outputs, list) else 1
+            print(f"✅ [{r.index}/{result.total}] {r.source} — {n} clip(s)")
+        else:
+            print(f"❌ [{r.index}/{result.total}] {r.source} FAILED: {r.error}")
+
+    if result.ok:
+        print(f"\n🔥 BATCH SUCCESS — {result.succeeded}/{result.total} source(s) clipped.")
+        return 0
+    print(f"\n❌ BATCH FAILED — {result.failed}/{result.total} source(s) failed.")
+    return 1
+
+
 def _cmd_clip(args: argparse.Namespace, settings: Settings) -> int:
+    sources = _resolve_sources(args)
+    if not sources:
+        print(
+            "❌ No source given: pass a URL, --source URL1,URL2,..., or --batch-file file.txt",
+            file=sys.stderr,
+        )
+        return 2
+
+    if getattr(args, "source", None) or getattr(args, "batch_file", None):
+        if args.output:
+            print("❌ --output is not supported with --source / --batch-file.", file=sys.stderr)
+            return 2
+        return _cmd_batch(args, settings, sources)
+
     from shorts_clipper.pipeline.runner import run
 
+    url = sources[0]
     out = Path(args.output) if args.output else None
     count = getattr(args, "count", 1)
     upload = getattr(args, "upload", False)
@@ -37,7 +125,7 @@ def _cmd_clip(args: argparse.Namespace, settings: Settings) -> int:
         from shorts_clipper.downloader.yt_dlp import get_base_yt_dlp_cmd
 
         cmd = get_base_yt_dlp_cmd()
-        cmd.extend(["--skip-download", "--print", "%(title)s\n%(uploader)s", "--", args.url])
+        cmd.extend(["--skip-download", "--print", "%(title)s\n%(uploader)s", "--", url])
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=15)
         lines = res.stdout.strip().split("\n")
         source_title = lines[0] if len(lines) > 0 else "YouTube Video"
@@ -51,7 +139,7 @@ def _cmd_clip(args: argparse.Namespace, settings: Settings) -> int:
 
     try:
         path_or_paths = run(
-            args.url,
+            url,
             settings=settings,
             output_path=out,
             count=count,
@@ -72,6 +160,10 @@ def _cmd_clip(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _cmd_autopilot(args: argparse.Namespace, settings: Settings) -> int:
+    sources = _resolve_sources(args)
+    if sources:
+        return _cmd_batch(args, settings, sources)
+
     from shorts_clipper.pipeline.runner import run_autopilot
 
     count = getattr(args, "count", 1)
@@ -180,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── clip ──────────────────────────────────────────────────────────────
     clip_p = sub.add_parser("clip", help="Clip a specific YouTube video.")
-    clip_p.add_argument("url", help="YouTube video URL.")
+    clip_p.add_argument("url", nargs="?", help="YouTube video URL.")
     clip_p.add_argument(
         "-o",
         "--output",
@@ -192,12 +284,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--count",
         type=int,
         default=1,
-        help="Number of viral clips to extract (default: 1)",
+        help="Number of viral clips to extract per source (default: 1)",
     )
     clip_p.add_argument(
         "--upload",
         action="store_true",
         help="Upload the resulting clips to YouTube Shorts",
+    )
+    clip_p.add_argument(
+        "--source",
+        nargs="+",
+        metavar="URL",
+        help="Batch: one or more YouTube URLs/IDs to clip sequentially "
+             "(comma-separated lists are also accepted).",
+    )
+    clip_p.add_argument(
+        "--batch-file",
+        metavar="FILE",
+        help="Batch: text file with one YouTube URL/ID per line "
+             "(blank lines and lines starting with '#' are ignored).",
+    )
+    clip_p.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Batch: keep going after a failed source instead of failing fast "
+             "(the overall run still exits non-zero).",
     )
 
     # ── autopilot ─────────────────────────────────────────────────────────
@@ -228,6 +339,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--upload",
         action="store_true",
         help="Upload the resulting clips to YouTube Shorts",
+    )
+    autopilot_p.add_argument(
+        "--source",
+        nargs="+",
+        metavar="URL",
+        help="Batch: one or more YouTube URLs/IDs to clip sequentially, "
+             "skipping discovery (comma-separated lists are also accepted).",
+    )
+    autopilot_p.add_argument(
+        "--batch-file",
+        metavar="FILE",
+        help="Batch: text file with one YouTube URL/ID per line "
+             "(blank lines and lines starting with '#' are ignored).",
+    )
+    autopilot_p.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Batch: keep going after a failed source instead of failing fast "
+             "(the overall run still exits non-zero).",
     )
 
     # ── scout ─────────────────────────────────────────────────────────────

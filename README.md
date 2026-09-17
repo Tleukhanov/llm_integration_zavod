@@ -88,6 +88,33 @@ python scripts/multi_channel.py --channels alpha --limit 1   # 1 VOD candidate, 
 - Deployment automation (systemd timers, Docker, GitHub Actions cron + state
   artifacts) is documented in [`DEPLOY.md`](DEPLOY.md).
 
+## Batch multi-source runs
+
+One factory run can process an explicit list of source videos sequentially,
+without restaging the CLI:
+
+```bash
+# Clip several videos in a single run (comma-separated or space-separated)
+shorts-clipper clip --source URL1 URL2 URL3
+shorts-clipper clip --source URL1,URL2,URL3
+
+# Same for autopilot — skips discovery and clips exactly the given sources
+shorts-clipper autopilot --source https://youtu.be/VID1 https://youtu.be/VID2
+
+# Provide sources in a text file (one per line; blank lines and '#' comments ignored)
+shorts-clipper autopilot --batch-file sources.txt
+```
+
+- Bare video IDs are accepted and expanded to watch URLs (`dq0TqEake8c` → `https://www.youtube.com/watch?v=dq0TqEake8c`).
+- Sources are processed **sequentially**; every successfully rendered clip is
+  recorded in the metrics store (`SHORTS_METRICS_PATH`) for later retention analysis.
+- Failure semantics: by default the batch **fails fast** — the first failed
+  source logs a clear per-source error line (`[source N] <url> FAILED: ...`),
+  aborts the rest, and the run exits non-zero. Add `--continue-on-error` to
+  keep processing the remaining sources; the run still exits non-zero if any
+  source failed, so a hard failure is never silently swallowed.
+- `-o/--output` is not available in batch mode (`--source` / `--batch-file`).
+
 ## CLI Reference
 
 ```
@@ -100,11 +127,17 @@ Commands:
     --channel TEXT       Specific channel to search
     --count INT          Number of clips to produce
     --upload             Publish after clipping
+    --source URL...      Batch: clip these URLs/IDs sequentially, skip discovery
+    --batch-file FILE    Batch: read sources from a text file (one per line)
+    --continue-on-error  Batch: keep going after a failed source (run still fails)
 
-  clip <url>           Clip a specific YouTube video
-    -o, --output PATH    Output file path
+  clip <url>           Clip a specific YouTube video (or a batch of sources)
+    -o, --output PATH    Output file path (single-source only)
     -c, --count INT      Number of clips
     --upload             Publish after clipping
+    --source URL...      Batch: clip these URLs/IDs sequentially
+    --batch-file FILE    Batch: read sources from a text file (one per line)
+    --continue-on-error  Batch: keep going after a failed source (run still fails)
 
   scout                Print trending URLs and exit
     -n, --count INT      Number of results
@@ -237,7 +270,7 @@ shorts_clipper/
 ├── transcription/          # faster-whisper integration
 ├── ui/                     # Static HTML/CSS/JS for web dashboard
 └── utils/                  # Video utilities
-tests/                      # 75 tests + 2 benchmarks
+tests/                      # 542 tests
 ```
 
 ## Known Limitations
@@ -285,7 +318,7 @@ python -m pytest tests/ -v
 ruff check . && ruff format --check .
 ```
 
-75 tests and 2 benchmarks, all passing.
+542 tests, all passing.
 
 ## Contributing
 

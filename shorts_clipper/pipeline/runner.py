@@ -20,7 +20,7 @@ import random
 import tempfile
 import zlib
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from shorts_clipper.affiliate import (
@@ -1252,3 +1252,195 @@ def run_autopilot(
             log.warning("Failed to record learning success: %s", e)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Batch multi-source runs
+# ---------------------------------------------------------------------------
+
+
+class BatchRunError(Exception):
+    """Hard failure in batch mode: a source failed and the run aborted."""
+
+
+@dataclass
+class BatchSourceResult:
+    """Outcome of a single source inside a :func:`run_batch` run."""
+
+    index: int
+    source: str
+    ok: bool
+    outputs: Path | list[Path] | None = None
+    error: str | None = None
+
+
+@dataclass
+class BatchResult:
+    """Aggregate outcome of a :func:`run_batch` run."""
+
+    ok: bool
+    results: list[BatchSourceResult]
+    total: int
+    succeeded: int
+    failed: int
+
+
+def normalize_source(source: str) -> str:
+    """Coerce a batch source into a full YouTube watch URL.
+
+    Full URLs pass through unchanged; a bare video ID is expanded to
+    ``https://www.youtube.com/watch?v=<id>`` so the pipeline downloaders
+    always receive a usable URL.
+    """
+    source = (source or "").strip()
+    if not source:
+        raise ValueError("source is empty")
+    if "://" in source:
+        return source
+    return f"https://www.youtube.com/watch?v={source}"
+
+
+def _sidecar_title(output_path: Path) -> str:
+    """Best-effort clip title read from its sidecar ``.json``."""
+    try:
+        sidecar = output_path.with_suffix(".json")
+        if sidecar.is_file():
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            return str(meta.get("title") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _record_batch_metrics(
+    settings: Settings,
+    url: str,
+    output_paths: Path | list[Path] | None,
+) -> None:
+    """Best-effort per-clip metrics recording for one batch source.
+
+    Mirrors ``scripts/factory.py``: every produced clip is persisted as a
+    ``ClipRecord`` (keyed by the canonical ``video_id``) in the metrics store
+    so later retention analysis can match views back to the source that
+    produced the clip. Never raises — a broken metrics path must not fail
+    the batch itself.
+    """
+    if not getattr(settings, "metrics_path", None) or not output_paths:
+        return
+    out_list = output_paths if isinstance(output_paths, list) else [output_paths]
+    try:
+        from shorts_clipper.core.metrics import ClipRecord, MetricsStore
+        from shorts_clipper.core.processed_store import extract_video_id
+
+        channel = getattr(settings, "channel_name", None) or ""
+        video_id = extract_video_id(url)
+        store = MetricsStore(settings.metrics_path)
+        try:
+            for out in out_list:
+                out_path = Path(out)
+                rec = ClipRecord(
+                    video_id=video_id,
+                    source_url=url,
+                    title=_sidecar_title(out_path),
+                    channel=channel,
+                    published=False,
+                    rendered_path=str(out_path),
+                )
+                store.record_clip(rec)
+        finally:
+            store.close()
+    except Exception as exc:
+        log.warning("Batch metrics recording skipped for %s: %s", url, exc)
+
+
+def run_batch(
+    sources: list[str] | tuple[str, ...],
+    *,
+    settings: Settings | None = None,
+    count: int = 1,
+    upload: bool = False,
+    privacy: str = "private",
+    continue_on_error: bool = False,
+    niche: str | None = None,
+    platforms: list[str] | None = None,
+    progress_callback: Callable[[int], None] | None = None,
+) -> BatchResult:
+    """Sequentially clip an explicit list of sources in one factory run.
+
+    Accepts YouTube URLs or bare video IDs (see :func:`normalize_source`).
+    Each source runs through the full :func:`run` pipeline in order, and every
+    successfully rendered clip is recorded in the metrics store for retention
+    analysis. A failed source is reported with a clear per-source error line:
+    by default the batch **fails fast** and raises :class:`BatchRunError`
+    without touching the remaining sources; with ``continue_on_error`` the
+    remaining sources are still processed and the aggregate
+    :class:`BatchResult` carries ``ok=False`` so the caller can still fail
+    the overall run instead of swallowing the error.
+
+    Returns:
+        Aggregate per-source outcomes.
+
+    Raises:
+        BatchRunError: On a hard failure while ``continue_on_error`` is False.
+    """
+    if settings is None:
+        settings = Settings.from_env()
+
+    results: list[BatchSourceResult] = []
+    total = len(sources)
+    log.info("🚀 BATCH RUN START: %d source(s), fail-fast=%s", total, not continue_on_error)
+
+    for index, raw in enumerate(sources, start=1):
+        try:
+            url = normalize_source(raw)
+        except ValueError as exc:
+            line = f"[source {index}] {raw!r} is not a valid URL or video ID: {exc}"
+            results.append(
+                BatchSourceResult(index=index, source=raw, ok=False, error=str(exc))
+            )
+            log.error("❌ BATCH %s", line)
+            if not continue_on_error:
+                raise BatchRunError(line) from exc
+            continue
+
+        log.info("BATCH processing source %d/%d: %s", index, total, url)
+        try:
+            outputs = run(
+                url,
+                settings=settings,
+                count=count,
+                upload=upload,
+                privacy=privacy,
+                niche=niche,
+                platforms=platforms,
+                progress_callback=progress_callback,
+            )
+            results.append(BatchSourceResult(index=index, source=url, ok=True, outputs=outputs))
+            _record_batch_metrics(settings, url, outputs)
+        except Exception as exc:
+            line = f"[source {index}] {url} FAILED: {exc}"
+            results.append(
+                BatchSourceResult(index=index, source=url, ok=False, error=str(exc))
+            )
+            log.error("❌ BATCH %s", line)
+            if not continue_on_error:
+                raise BatchRunError(line) from exc
+
+    succeeded = sum(1 for r in results if r.ok)
+    failed = total - succeeded
+    outcome = BatchResult(
+        ok=succeeded == total and total > 0,
+        results=results,
+        total=total,
+        succeeded=succeeded,
+        failed=failed,
+    )
+    if failed:
+        log.info(
+            "BATCH RUN DONE: %d/%d source(s) succeeded — FAILED, see per-source lines above.",
+            succeeded,
+            total,
+        )
+    else:
+        log.info("BATCH RUN DONE: %d/%d source(s) succeeded.", succeeded, total)
+    return outcome
