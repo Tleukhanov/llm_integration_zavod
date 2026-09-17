@@ -40,3 +40,6 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["shorts_clipper*"]
+
+[tool.setuptools.package-data]
+shorts_clipper = ["ui/index.html", "ui/js/*.js", "ui/css/*.css"]
