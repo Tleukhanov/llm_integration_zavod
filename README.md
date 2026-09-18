@@ -224,6 +224,9 @@ a friendly message and leaves no report behind.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `SHORTS_METRICS_PATH` | `data/metrics.sqlite` | SQLite path for produced-clip metrics; powers the scout channel-feedback bonus |
 | `SHORTS_FACTORY_DAILY_CAP` | `6` | Max clips to publish per channel per day |
+| `SHORTS_GAME_NAME` | `cs2` | Game short-name for scout defaults (search queries, keyword expansion) |
+| `SHORTS_GAME_LABEL` | `Counter-Strike 2` | Human-readable game label for user-facing text (e.g. affiliate CTA captions) |
+| `SHORTS_GAME_HASHTAGS` | `#cs2,#counterstrike2` | Comma-separated game hashtags appended to published descriptions/captions |
 | `OPENAI_API_KEY` | — | OpenAI API key (if using `openai` provider) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (if using `anthropic` provider) |
 

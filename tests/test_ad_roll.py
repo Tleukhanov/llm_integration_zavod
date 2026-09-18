@@ -64,13 +64,13 @@ class AutoCtaTextTests(unittest.TestCase):
         partner = AffiliatePartner(
             id="p", name="SkinFarm", link_en="https://x/en"
         )
-        self.assertIn("SkinFarm", auto_cta_text(partner))
+        self.assertIn("SkinFarm", auto_cta_text(partner, "Counter-Strike 2"))
 
     def test_matches_expected_default(self):
         partner = AffiliatePartner(
             id="p", name="FanOdd", link_en="https://x/en"
         )
-        self.assertEqual(auto_cta_text(partner), "FanOdd — скины CS2, ссылка в описании")
+        self.assertEqual(auto_cta_text(partner, "Valorant"), "FanOdd — скины Valorant, ссылка в описании")
 
 
 class SettingsParseTests(unittest.TestCase):

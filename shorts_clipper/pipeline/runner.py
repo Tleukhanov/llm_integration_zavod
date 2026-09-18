@@ -783,7 +783,8 @@ def run(
                         "ad_card_start": card_start,
                         "ad_card_duration": settings.affiliate_ad_duration_sec,
                         "ad_card_text": settings.affiliate_cta_text or auto_cta_text(
-                            affiliate_partner
+                            affiliate_partner,
+                            settings.game_label,
                         ),
                     }
                     # In gameplay mode the audio/emotion peak is known — pass it
@@ -919,6 +920,12 @@ def run(
                         log.warning(
                             "Affiliate metadata enrichment failed for clip %d: %s", idx, aff_err
                         )
+
+                # Append game-authored hashtags so published captions/descriptions
+                # carry the configured game identity (factory-as-a-service).
+                for game_tag in getattr(settings, "game_hashtags", []) or []:
+                    if game_tag and game_tag not in meta["tags"]:
+                        meta["tags"].append(game_tag)
 
                 # Append music attribution (CC-BY royalty-free tracks) so
                 # publishers can credit the source, if a track with a

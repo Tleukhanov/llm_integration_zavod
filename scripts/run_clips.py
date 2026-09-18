@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
 
         discovered = auto_discover(
             settings,
-            query="cs2 gameplay",
+            query=None,
             providers=("youtube",),
             max_results=5,
         )

@@ -245,9 +245,9 @@ def import_from_research(
     return partners
 
 
-def auto_cta_text(partner: AffiliatePartner) -> str:
+def auto_cta_text(partner: AffiliatePartner, game_label: str) -> str:
     """Build a default CTA for a partner's mid-roll ad card."""
-    return f"{partner.name} — скины CS2, ссылка в описании"
+    return f"{partner.name} — скины {game_label}, ссылка в описании"
 
 
 def build_affiliate_description(meta: dict, partner: AffiliatePartner, language: str) -> str:
