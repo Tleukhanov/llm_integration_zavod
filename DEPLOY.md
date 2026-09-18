@@ -285,6 +285,9 @@ sudo systemctl disable --now shorts-metrics.timer
 | `SHORTS_PUBLISH_AT` | `—` | Время публикации (HH:MM) |
 | `SHORTS_PUBLISH_INTERVAL` | `30` | Интервал между публикациями (сек) |
 | `SHORTS_FACTORY_DAILY_CAP` | `6` | Лимит клипов/день |
+| `SHORTS_RETENTION_AMPLIFY` | `false` | Усиление публикаций по удержанию: пары (ниша, платформа) с оценкой ниже пола/мин. оценки пропускаются, а пары с оценкой `A` получают бюджет `SHORTS_FACTORY_DAILY_CAP × SHORTS_RETENTION_AMPLIFY_FACTOR` |
+| `SHORTS_RETENTION_MIN_GRADE` | `B` | Минимальная допустимая буквенная оценка (`A`/`B`/`C`/`D`) при включённом усилении |
+| `SHORTS_RETENTION_AMPLIFY_FACTOR` | `1.5` | Множитель дневного лимита только для пар с оценкой `A` (мин. `1.0`) |
 | `SHORTS_TITLE_VARIANT` | `-1` | Вариант титула (auto) |
 | `SHORTS_FACTORY_PUBLISH_HOUR_START` | `—` | Час начала окна публикации |
 | `SHORTS_FACTORY_PUBLISH_HOUR_END` | `—` | Час конца окна публикации |

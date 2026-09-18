@@ -115,6 +115,9 @@ class Settings:
     channel_creds_dir: str = "data/creds"
     metrics_path: Path = Path("data/metrics.sqlite")
     factory_daily_cap: int = 6
+    retention_amplify: bool = False
+    retention_min_grade: str = "B"
+    retention_amplify_factor: float = 1.5
     title_variant: int = -1
     factory_publish_hour_start: int | None = None
     factory_publish_hour_end: int | None = None
@@ -200,6 +203,27 @@ class Settings:
             factory_daily_cap = 6
         if factory_daily_cap < 0:
             factory_daily_cap = 6
+
+        retention_amplify = (
+            _env("SHORTS_RETENTION_AMPLIFY", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+
+        retention_min_grade = (
+            _env("SHORTS_RETENTION_MIN_GRADE", file_values, "B") or "B"
+        ).strip().upper()
+        if retention_min_grade not in {"A", "B", "C", "D"}:
+            raise ValueError(
+                f"SHORTS_RETENTION_MIN_GRADE must be one of A/B/C/D, "
+                f"got {retention_min_grade!r}"
+            )
+
+        try:
+            retention_amplify_factor = float(
+                _env("SHORTS_RETENTION_AMPLIFY_FACTOR", file_values, "1.5") or "1.5"
+            )
+        except ValueError:
+            retention_amplify_factor = 1.5
+        retention_amplify_factor = max(1.0, retention_amplify_factor)
 
         try:
             title_variant = int(
@@ -524,6 +548,9 @@ class Settings:
                 or "data/metrics.sqlite"
             ),
             factory_daily_cap=factory_daily_cap,
+            retention_amplify=retention_amplify,
+            retention_min_grade=retention_min_grade,
+            retention_amplify_factor=retention_amplify_factor,
             title_variant=title_variant,
             factory_publish_hour_start=factory_publish_hour_start,
             factory_publish_hour_end=factory_publish_hour_end,

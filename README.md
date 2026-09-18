@@ -224,6 +224,9 @@ a friendly message and leaves no report behind.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `SHORTS_METRICS_PATH` | `data/metrics.sqlite` | SQLite path for produced-clip metrics; powers the scout channel-feedback bonus |
 | `SHORTS_FACTORY_DAILY_CAP` | `6` | Max clips to publish per channel per day |
+| `SHORTS_RETENTION_AMPLIFY` | `false` | Retention-driven publish amplification: skip (niche, platform) pairs that retain below the floor/min grade and scale the daily-cap budget by `SHORTS_RETENTION_AMPLIFY_FACTOR` for A-grade pairs |
+| `SHORTS_RETENTION_MIN_GRADE` | `B` | Lowest retention grade letter (`A`/`B`/`C`/`D`) allowed to publish when amplification is on |
+| `SHORTS_RETENTION_AMPLIFY_FACTOR` | `1.5` | Daily-cap multiplier applied only to pairs with an `A` retention grade (min `1.0`) |
 | `OPENAI_API_KEY` | — | OpenAI API key (if using `openai` provider) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (if using `anthropic` provider) |
 
