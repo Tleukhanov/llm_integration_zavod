@@ -121,6 +121,9 @@ class Settings:
     title_variant: int = -1
     factory_publish_hour_start: int | None = None
     factory_publish_hour_end: int | None = None
+    game_name: str = "cs2"
+    game_label: str = "Counter-Strike 2"
+    game_hashtags: list[str] = field(default_factory=lambda: ["#cs2", "#counterstrike2"])
 
     @property
     def channel_token_dir(self) -> Path:
@@ -247,6 +250,14 @@ class Settings:
                 factory_publish_hour_end = int(raw_hour)
             except ValueError:
                 factory_publish_hour_end = None
+
+        game_name = _env("SHORTS_GAME_NAME", file_values, "cs2") or "cs2"
+        game_label = _env("SHORTS_GAME_LABEL", file_values, "Counter-Strike 2") or "Counter-Strike 2"
+        game_hashtags_raw = (
+            _env("SHORTS_GAME_HASHTAGS", file_values, "#cs2,#counterstrike2")
+            or "#cs2,#counterstrike2"
+        )
+        game_hashtags = [h.strip() for h in game_hashtags_raw.split(",") if h.strip()]
 
         proxy = _env("SHORTS_PROXY", file_values)
 
@@ -554,4 +565,7 @@ class Settings:
             title_variant=title_variant,
             factory_publish_hour_start=factory_publish_hour_start,
             factory_publish_hour_end=factory_publish_hour_end,
+            game_name=game_name,
+            game_label=game_label,
+            game_hashtags=game_hashtags,
         )

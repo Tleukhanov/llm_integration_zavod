@@ -51,6 +51,22 @@ NICHE_KEYWORDS: dict[str, list[str]] = {
         "клатч кс",
         "кс2 клатч",
     ],
+    "fortnite": [
+        "fortnite clutch",
+        "fortnite 1v5",
+        "fortnite highlight",
+        "fortnite best moments",
+        "fortnite gameplay",
+        "fortnite montage",
+    ],
+    "valorant": [
+        "valorant clutch",
+        "valorant 1v5",
+        "valorant ace",
+        "valorant best moments",
+        "valorant highlight",
+        "valorant gameplay",
+    ],
     "finance": [
         "stock market",
         "investing",
@@ -139,12 +155,25 @@ def _expand_niche_dynamically(niche: str) -> list[str]:
     return ["tips", "story", "analysis", "news", "guide", "highlights"]
 
 
-def get_keywords(niche: str) -> list[str]:
+GENERIC_GAMEPLAY_KEYWORDS: list[str] = [
+    "clutch",
+    "1v5",
+    "ace",
+    "best moments",
+    "highlight",
+    "gameplay",
+    "insane play",
+]
+
+
+def get_keywords(niche: str, game_name: str | None = None) -> list[str]:
     """
     Return keyword list for a niche.
     Dynamically expands unknown niches.
     """
     niche_lower = niche.lower().strip()
+    if game_name and game_name.strip().lower() == niche_lower:
+        return [f"{niche_lower} {term}" for term in GENERIC_GAMEPLAY_KEYWORDS]
     for key, kws in NICHE_KEYWORDS.items():
         if key in niche_lower or niche_lower in key:
             return kws
@@ -153,7 +182,9 @@ def get_keywords(niche: str) -> list[str]:
     return _expand_niche_dynamically(niche_lower)
 
 
-def build_queries(niche: str, keyword: str | None, count: int = 4) -> list[str]:
+def build_queries(
+    niche: str, keyword: str | None, count: int = 4, game_name: str | None = None
+) -> list[str]:
     """
     Build search queries for discovery.
     Supports multiple keywords separated by commas, pipes, or semicolons.
@@ -175,7 +206,7 @@ def build_queries(niche: str, keyword: str | None, count: int = 4) -> list[str]:
             )
         return queries
 
-    kws = get_keywords(niche)
+    kws = get_keywords(niche, game_name=game_name)
     selected = random.sample(kws, min(count, len(kws)))
 
     queries = []

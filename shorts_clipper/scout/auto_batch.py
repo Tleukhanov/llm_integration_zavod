@@ -75,7 +75,7 @@ def _load_recorded_ids(metrics_db: str | Path | None, settings: Any) -> set[str]
 
 def auto_discover(
     settings: Any,
-    query: str = "cs2 gameplay",
+    query: str | None = None,
     providers: tuple[str, ...] = ("youtube",),
     max_results: int = 10,
     channels: tuple[str, ...] | None = None,
@@ -87,8 +87,10 @@ def auto_discover(
 
     Args:
         settings: Application settings object exposing ``processed_videos_path``
-            (and optionally ``metrics_path``).
-        query: Free-text search term forwarded to each provider.
+            (and optionally ``metrics_path`` and ``game_name``).
+        query: Free-text search term forwarded to each provider. When omitted,
+            defaults to ``"{game_name} gameplay"`` (e.g. ``"cs2 gameplay"``)
+            so discovery follows the configured game identity.
         providers: Tuple of registered provider names to invoke.
         max_results: Maximum number of fresh results to return.
         channels: Channel videos-page URIs; overrides ``config/vod_sources.json``
@@ -112,6 +114,8 @@ def auto_discover(
         pipeline is never interrupted.
     """
     try:
+        if not query:
+            query = f"{getattr(settings, 'game_name', 'cs2')} gameplay"
         store = ProcessedStore.from_path(settings.processed_videos_path)
         processed_ids = store.all_ids()
         recorded_ids = _load_recorded_ids(metrics_db, settings)

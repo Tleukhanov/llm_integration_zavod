@@ -227,6 +227,9 @@ a friendly message and leaves no report behind.
 | `SHORTS_RETENTION_AMPLIFY` | `false` | Retention-driven publish amplification: skip (niche, platform) pairs that retain below the floor/min grade and scale the daily-cap budget by `SHORTS_RETENTION_AMPLIFY_FACTOR` for A-grade pairs |
 | `SHORTS_RETENTION_MIN_GRADE` | `B` | Lowest retention grade letter (`A`/`B`/`C`/`D`) allowed to publish when amplification is on |
 | `SHORTS_RETENTION_AMPLIFY_FACTOR` | `1.5` | Daily-cap multiplier applied only to pairs with an `A` retention grade (min `1.0`) |
+| `SHORTS_GAME_NAME` | `cs2` | Game short-name for scout defaults (search queries, keyword expansion) |
+| `SHORTS_GAME_LABEL` | `Counter-Strike 2` | Human-readable game label for user-facing text (e.g. affiliate CTA captions) |
+| `SHORTS_GAME_HASHTAGS` | `#cs2,#counterstrike2` | Comma-separated game hashtags appended to published descriptions/captions |
 | `OPENAI_API_KEY` | — | OpenAI API key (if using `openai` provider) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (if using `anthropic` provider) |
 

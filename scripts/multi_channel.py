@@ -30,8 +30,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Comma-separated channel profile names (e.g. 'alpha,bravo'). "
                         "Defaults to $SHORTS_CHANNEL, then SHORTS_CHANNEL in .env, "
                         "then 'alpha'.")
-    p.add_argument("--query", default="cs2 gameplay",
-                   help="Search query for VOD discovery (default: 'cs2 gameplay').")
+    p.add_argument("--query", default=None,
+                   help="Search query for VOD discovery "
+                        "(default: '<SHORTS_GAME_NAME> gameplay', e.g. 'cs2 gameplay').")
     p.add_argument("--providers", default="youtube",
                    help="Comma-separated provider names (default: 'youtube').")
     p.add_argument("--count", type=int, default=3, dest="count",

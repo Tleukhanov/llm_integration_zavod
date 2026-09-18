@@ -30,8 +30,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Autopilot factory: discover VODs, clip them, optionally publish.",
     )
-    p.add_argument("--query", default="cs2 gameplay",
-                   help="Search query for VOD discovery (default: 'cs2 gameplay').")
+    p.add_argument("--query", default=None,
+                   help="Search query for VOD discovery "
+                        "(default: '<SHORTS_GAME_NAME> gameplay', e.g. 'cs2 gameplay').")
     p.add_argument("--providers", default="youtube",
                    help="Comma-separated provider names (default: 'youtube').")
     p.add_argument("--count", type=int, default=3, dest="count",
