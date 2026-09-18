@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import concurrent.futures
 import json
 import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -13,6 +16,10 @@ from shorts_clipper.core.settings import Settings
 from .cloudflare_r2 import R2Storage
 from .models import ClipMetadata, PublishResult
 from .registry import PublisherRegistry
+
+if TYPE_CHECKING:
+    from shorts_clipper.editorial.profiles import EditorialProfile
+    from shorts_clipper.editorial.retention_amplify import RetentionGrade
 
 log = logging.getLogger(__name__)
 
@@ -323,6 +330,10 @@ class PublishingEngine:
         platforms: list[str],
         video_id: str | None = None,
         transcript_text: str = "",
+        *,
+        niche: str | None = None,
+        retention_grades: dict[tuple[str | None, str | None], RetentionGrade] | None = None,
+        profile: EditorialProfile | None = None,
     ) -> dict[str, PublishResult]:
         """
         Publish a video to multiple platforms independently and concurrently.
@@ -410,6 +421,43 @@ class PublishingEngine:
                 raise ComplianceBlocked(
                     f"Compliance gate errored; clip auto-blocked: {exc}"
                 ) from exc
+
+        # ── Retention amplifier gate (feature-on only) ────────────────
+        # When enabled, drop platforms whose (niche, platform) retention grade
+        # is below the configured floor / min grade, and record each pair's
+        # amplify factor so the daily-cap budget can be scaled for A-grade
+        # pairs without touching other pairs (see amplify_factor_for /
+        # effective_daily_cap below).
+        self._retention_decisions: dict[tuple[Any, Any], Any] = {}
+        if getattr(settings, "retention_amplify", False):
+            from shorts_clipper.editorial.profiles import DEFAULT_PROFILE
+            from shorts_clipper.editorial.retention_amplify import decide_publish
+
+            active_profile = profile or DEFAULT_PROFILE
+            grades = retention_grades or {}
+            retained: list[str] = []
+            for platform_name in platforms:
+                decision = decide_publish(
+                    active_profile,
+                    niche,
+                    platform_name,
+                    grades,
+                    min_grade=getattr(settings, "retention_min_grade", "B"),
+                    amplify_factor=getattr(settings, "retention_amplify_factor", 1.5),
+                )
+                self._retention_decisions[(niche, platform_name)] = decision
+                if decision.allowed:
+                    retained.append(platform_name)
+                else:
+                    log.info(
+                        "[amplifier] skip %s/%s: %s",
+                        niche if niche is not None else "?",
+                        platform_name,
+                        decision.reason,
+                    )
+            platforms = retained
+            if not platforms:
+                log.info("[amplifier] all platforms skipped; nothing to publish.")
 
         # Authenticate all publishers first (fail early)
         publishers = {}
@@ -739,6 +787,26 @@ class PublishingEngine:
         self._generate_manifest(video_path, metadata, results)
 
         return results
+
+    def retention_decisions(self) -> dict[tuple[Any, Any], Any]:
+        """(niche, platform) → gate decision from the last publish run."""
+        return dict(getattr(self, "_retention_decisions", {}))
+
+    def amplify_factor_for(self, niche: str | None, platform: str) -> float:
+        """Amplitude factor for one (niche, platform) pair (1.0 by default)."""
+        decision = getattr(self, "_retention_decisions", {}).get((niche, platform))
+        return getattr(decision, "amplify_factor", 1.0) if decision is not None else 1.0
+
+    def effective_daily_cap(
+        self, base_cap: float, niche: str | None, platform: str
+    ) -> float:
+        """Daily-cap budget for one pair: ``base_cap * amplify_factor`` when the
+        pair is allowed and amplified; unchanged ``base_cap`` otherwise.
+        """
+        decision = getattr(self, "_retention_decisions", {}).get((niche, platform))
+        if decision is None or not getattr(decision, "allowed", False):
+            return base_cap
+        return base_cap * getattr(decision, "amplify_factor", 1.0)
 
     def _short_url_for(self, publisher, platform_id: str) -> str | None:
         """Best-effort public URL for an id recovered by an idempotency check."""

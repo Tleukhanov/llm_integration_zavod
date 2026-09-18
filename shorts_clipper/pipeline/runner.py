@@ -54,6 +54,20 @@ from shorts_clipper.transcription.whisper import transcribe_clip
 log = logging.getLogger(__name__)
 
 
+def _refresh_retention_grades(settings):
+    """One-time retention-grade refresh for the amplification feature.
+
+    Returns the current (niche, platform) retention grades when the feature is
+    on; an empty dict otherwise (feature off / missing DB → feature-opt
+    allow-all, never crash).
+    """
+    if not getattr(settings, "retention_amplify", False):
+        return {}
+    from shorts_clipper.editorial.retention_amplify import current_retention_grades
+
+    return current_retention_grades(settings)
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -102,6 +116,15 @@ def run(
 
     configure_logging(settings.log_level)
     log.info("🚀 PIPELINE START: %s (extracting %d clip(s))", url, count)
+
+    # Retention amplifier: refresh the current (niche, platform) grades once
+    # per run so the manager can gate/amplify publishing decisions against them.
+    retention_grades: dict = _refresh_retention_grades(settings)
+    if retention_grades:
+        log.info(
+            "[amplifier] retention grades refreshed for %d (niche, platform) pair(s)",
+            len(retention_grades),
+        )
 
     from shorts_clipper.core.processed_store import extract_video_id
 
@@ -1038,6 +1061,8 @@ def run(
                             transcript_text=" ".join(
                                 getattr(s, "text", "") or "" for s in precision_segments
                             ),
+                            niche=actual_niche,
+                            retention_grades=retention_grades,
                         )
 
                         # Update metadata JSON with results

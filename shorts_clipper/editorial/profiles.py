@@ -5,11 +5,17 @@ from dataclasses import dataclass, field
 
 @dataclass
 class EditorialProfile:
-    """Defines weights and minimum thresholds for judges."""
+    """Defines weights and minimum thresholds for judges.
+
+    ``retention_floor`` (optional, 0..1): when set, a niche+platform pair is
+    only worth publishing if the current retention-grade value (0..1) for
+    that pair is >= floor.
+    """
 
     name: str
     weights: dict[str, float] = field(default_factory=dict)
     default_weight: float = 1.0
+    retention_floor: float | None = None
 
 
 # Define base profiles
