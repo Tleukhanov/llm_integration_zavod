@@ -61,6 +61,24 @@ CREATE TABLE IF NOT EXISTS clips (
 )
 """
 
+#: Affiliate income events (clicks / conversions / revenue) kept in their own
+#: table so the ``clips`` schema never grows for income tracking purposes and
+#: old metrics files keep working without migration columns.
+_AFFILIATE_EVENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS affiliate_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stack TEXT,
+    published_at TEXT,
+    platform TEXT,
+    niche TEXT,
+    partner_id TEXT,
+    event_type TEXT,
+    amount REAL
+)
+"""
+
+_DEFAULT_STACK = "default"
+
 
 class MetricsStore:
     """SQLite store for clip records and their collected performance stats."""
@@ -79,9 +97,11 @@ class MetricsStore:
 
         Also migrates pre-existing databases in place by adding any missing
         ``source_channel`` / ``platform`` / ``platform_id`` / ``short_url``
-        columns, so old metric files keep working without a rebuild.
+        columns, so old metric files keep working without a rebuild. The
+        ``affiliate_events`` income table is created idempotently too.
         """
         self._conn.execute(_SCHEMA)
+        self._conn.execute(_AFFILIATE_EVENTS_SCHEMA)
         existing = {
             r["name"] for r in self._conn.execute("PRAGMA table_info(clips)").fetchall()
         }
@@ -150,6 +170,39 @@ class MetricsStore:
             "UPDATE clips SET platform=?, platform_id=?, short_url=?, "
             "published=1, publish_ts=COALESCE(publish_ts, ?) WHERE video_id=?",
             (platform, platform_id, short_url, _now_iso(), video_id),
+        )
+        self._conn.commit()
+
+    def record_affiliate_event(
+        self,
+        platform: str,
+        niche: str,
+        partner_id: str,
+        event_type: str,
+        amount: float | None = None,
+        stack: str = _DEFAULT_STACK,
+    ) -> None:
+        """Record an affiliate income event (``click`` / ``conversion`` / ``revenue``).
+
+        Every row is stamped with the current UTC time as ``published_at`` so
+        income is attributable per (platform, niche, partner) over time.
+        ``amount`` is only meaningful for ``revenue`` events.
+        """
+        if event_type not in {"click", "conversion", "revenue"}:
+            raise ValueError(f"Unknown affiliate event_type: {event_type!r}")
+        self._conn.execute(
+            "INSERT INTO affiliate_events "
+            "(stack, published_at, platform, niche, partner_id, event_type, amount) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                stack,
+                _now_iso(),
+                platform,
+                niche,
+                partner_id,
+                event_type,
+                amount,
+            ),
         )
         self._conn.commit()
 

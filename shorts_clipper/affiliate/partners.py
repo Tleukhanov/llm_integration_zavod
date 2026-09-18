@@ -11,6 +11,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 log = logging.getLogger(__name__)
 
@@ -245,12 +246,43 @@ def import_from_research(
     return partners
 
 
+def decorate_affiliate_url(link: str, partner_id: str, clip_name: str) -> str:
+    """Append affiliate UTM tracking params to *link*.
+
+    ``utm_source=shorts`` / ``utm_medium=affiliate`` identify the traffic
+    source, ``utm_campaign`` pins the partner id and ``utm_content`` the clip.
+    Existing query params are detected and joined with ``&`` (via a ``?``
+    separator only when the link has none), so a pre-tagged URL never ends up
+    with a second ``?``. Fragments are preserved after the query.
+    """
+    parts = urlsplit(link)
+    extra = urlencode(
+        {
+            "utm_source": "shorts",
+            "utm_medium": "affiliate",
+            "utm_campaign": partner_id,
+            "utm_content": clip_name,
+        }
+    )
+    query = f"{parts.query}&{extra}" if parts.query else extra
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def auto_cta_text(partner: AffiliatePartner) -> str:
     """Build a default CTA for a partner's mid-roll ad card."""
     return f"{partner.name} — скины CS2, ссылка в описании"
 
 
-def build_affiliate_description(meta: dict, partner: AffiliatePartner, language: str) -> str:
-    """Append the partner offer + link + disclosure tag to a description."""
+def build_affiliate_description(
+    meta: dict, partner: AffiliatePartner, language: str, clip_name: str | None = None
+) -> str:
+    """Append the partner offer + link + disclosure tag to a description.
+
+    When *clip_name* is given the final link is UTM-decorated (see
+    :func:`decorate_affiliate_url`) so the click can be attributed per clip.
+    """
     description = meta.get("description") or ""
-    return f"{description}\n\n{partner.caption_text(language)}\n{partner.link(language)}\n{partner.tag}"
+    link = partner.link(language)
+    if clip_name:
+        link = decorate_affiliate_url(link, partner.id, clip_name)
+    return f"{description}\n\n{partner.caption_text(language)}\n{link}\n{partner.tag}"

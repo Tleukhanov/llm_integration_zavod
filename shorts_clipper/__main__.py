@@ -255,6 +255,12 @@ def _cmd_retention_report(args: argparse.Namespace, settings: Settings) -> int:
     return run_retention_report(settings, args)
 
 
+def _cmd_revenue_report(args: argparse.Namespace, settings: Settings) -> int:
+    from shorts_clipper.cli.revenue_report import run_revenue_report
+
+    return run_revenue_report(settings, args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m shorts_clipper",
@@ -440,6 +446,29 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: outputs/retention_report.json).",
     )
 
+    # ── revenue-report ───────────────────────────────────────────────────────────
+    revenue_p = sub.add_parser(
+        "revenue-report",
+        help="Affiliate income report (total revenue, platform/niche and per-partner "
+             "breakdown) from the affiliate_events table in the metrics DB.",
+    )
+    revenue_p.add_argument(
+        "--niche",
+        default=None,
+        help="Only report rows for this niche (default: all).",
+    )
+    revenue_p.add_argument(
+        "--partner",
+        default=None,
+        help="Only report rows for this partner id (default: all).",
+    )
+    revenue_p.add_argument(
+        "--out",
+        metavar="PATH",
+        default=None,
+        help="Path to the Markdown report (default: outputs/revenue_report.md).",
+    )
+
     return parser
 
 
@@ -463,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         "cleanup": _cmd_cleanup,
         "doctor": _cmd_doctor,
         "retention-report": _cmd_retention_report,
+        "revenue-report": _cmd_revenue_report,
     }
     return dispatch[args.command](args, settings)
 
