@@ -910,7 +910,8 @@ def run(
                     try:
                         partner_language = str(meta.get("language") or "en")
                         meta["description"] = build_affiliate_description(
-                            meta, affiliate_partner, partner_language
+                            meta, affiliate_partner, partner_language,
+                            clip_name=current_output_path.stem,
                         )
                         if affiliate_partner.tag and affiliate_partner.tag not in meta["tags"]:
                             meta["tags"].append(affiliate_partner.tag)

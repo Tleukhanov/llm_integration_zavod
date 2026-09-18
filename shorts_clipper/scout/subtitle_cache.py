@@ -14,27 +14,33 @@ def _get_db():
         if _conn_pool is None:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             # Use isolation_level=None for autocommit and avoid transaction deadlocks
-            _conn_pool = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
+            try:
+                # Performance and concurrency optimizations
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA busy_timeout=5000")
 
-            # Performance and concurrency optimizations
-            _conn_pool.execute("PRAGMA journal_mode=WAL")
-            _conn_pool.execute("PRAGMA synchronous=NORMAL")
-            _conn_pool.execute("PRAGMA busy_timeout=5000")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subtitle_cache (
+                        video_id      TEXT PRIMARY KEY,
+                        status        TEXT,
+                        language      TEXT,
+                        checked_at    REAL,
+                        expires_at    REAL
+                    )
+                """)
 
-            _conn_pool.execute("""
-                CREATE TABLE IF NOT EXISTS subtitle_cache (
-                    video_id      TEXT PRIMARY KEY,
-                    status        TEXT,
-                    language      TEXT,
-                    checked_at    REAL,
-                    expires_at    REAL
+                # Create an index on expires_at to speed up purge_expired
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_expires_at ON subtitle_cache(expires_at)"
                 )
-            """)
-
-            # Create an index on expires_at to speed up purge_expired
-            _conn_pool.execute(
-                "CREATE INDEX IF NOT EXISTS idx_expires_at ON subtitle_cache(expires_at)"
-            )
+            except Exception:
+                # A half-initialized pool must not be kept nor leaked: close
+                # it and let the next caller retry from scratch.
+                conn.close()
+                raise
+            _conn_pool = conn
     return _conn_pool
 
 
