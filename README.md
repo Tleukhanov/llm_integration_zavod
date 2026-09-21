@@ -45,8 +45,8 @@ graph LR
 
 ```bash
 # Clone and install
-git clone https://github.com/random-or/shorts-clipper.git
-cd shorts-clipper
+git clone https://github.com/Tleukhanov/llm_integration_zavod.git
+cd llm_integration_zavod
 pip install -e .
 
 # Minimum config — just metadata generation needs an API key
@@ -382,6 +382,33 @@ A: The pipeline uses the free tier of Gemini 1.5 Flash (via Google AI Studio) fo
 
 **Q: Why doesn't the YouTube uploader resume uploads?**
 A: The current `google-api-python-client` integration resets the upload cursor on timeout. A true chunked resume implementation is planned for a future release.
+
+## Attribution
+
+Shorts Clipper is free open-source software. It is **not** a re-branding of a
+closed/copyrighted original — the factory is written from scratch for the
+CS2/CS:GO shorts niche yard in this repository and is published under your
+account/URL:
+
+- Project: `https://github.com/Tleukhanov/llm_integration_zavod`
+- License: MIT (full text in [`LICENSE`](LICENSE))
+- Copyright: © 2026 Shorts Clipper contributors (listed in `git log` / `AUTHORS.md`)
+
+The pipeline *builds on* well-known open-source components, which carry their
+own licenses and are **not** relicensed here:
+
+| Component        | Purpose                     | License (upstream) |
+| ---------------- | --------------------------- | ------------------ |
+| `yt-dlp`         | YouTube/VOD download        | Unlicense/Public Domain |
+| `faster-whisper` / `openai-whisper` | Speech-to-text captions | MIT |
+| `ffmpeg`         | Media processing            | LGPL/GPL (choice)  |
+| `ruff` / `pytest` | Dev tooling                | MIT |
+| `curl-cffi`      | HTTP (impersonation)        | MIT |
+
+These upstream projects retain their original copyright and licenses — see each
+component's own LICENSE. This attribution does not claim ownership of them.
+To report a copyright concern about our code, open an issue in the repository
+above.
 
 ## License
 
