@@ -385,14 +385,17 @@ A: The current `google-api-python-client` integration resets the upload cursor o
 
 ## Attribution
 
-Shorts Clipper is free open-source software. It is **not** a re-branding of a
-closed/copyrighted original — the factory is written from scratch for the
-CS2/CS:GO shorts niche yard in this repository and is published under your
-account/URL:
+This repository is a **fork / continuation** of the open-source project
+[`random-or/shorts-clipper`](https://github.com/random-or/shorts-clipper) (MIT):
+its base code was imported as the very first commit in this repo
+(`5eff3e9` — *"Import shorts-clipper base …"*), then extended here with the
+publisher, scout autopilot, retention and affiliate-income features. We do
+**not** claim authorship of the upstream base.
 
 - Project: `https://github.com/Tleukhanov/llm_integration_zavod`
+- Upstream: `https://github.com/random-or/shorts-clipper`
 - License: MIT (full text in [`LICENSE`](LICENSE))
-- Copyright: © 2026 Shorts Clipper contributors (listed in `git log` / `AUTHORS.md`)
+- Upstream copyright: © 2026 Shorts Clipper contributors (retained in [`LICENSE`](LICENSE))
 
 The pipeline *builds on* well-known open-source components, which carry their
 own licenses and are **not** relicensed here:
