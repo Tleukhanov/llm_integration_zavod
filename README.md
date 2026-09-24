@@ -70,6 +70,36 @@ shorts-clipper web
 
 You can also run via module: `python -m shorts_clipper <command>`.
 
+## Stock visual mode (InnerVoicez-style originals)
+
+Instead of cutting a YouTube VOD, run the factory in **stock** mode to assemble
+*original* shorts: a script (quotes/philosophy), a background (local MP4 or
+procedural gradient), a slow Ken-Burns zoom, word-by-word subtitles and an Edge
+TTS voiceover. No VODs, no API keys, no copyright risk:
+
+```bash
+# Pick any local MP4s as backdrops (subfolder per niche shadows top-level):
+mkdir -p data/stock/self-growth   # optional: $NICHE/stuff.mp4
+# drop clips into data/stock/ or data/stock/<niche>/
+
+# Optional: your own script file (one line per short), else built-in quote bank
+echo "Discipline is a bridge between goals and accomplishment." > scripts.txt
+
+SHORTS_VISUAL_MODE=stock \
+SHORTS_STOCK_DIR=data/stock \
+SHORTS_STOCK_SCRIPT_PATH=scripts.txt \
+shorts-clipper autopilot --niche self-growth --count 5
+```
+
+- `SHORTS_VISUAL_MODE`: `clip` (default, YouTube-VOD pipeline) or `stock`.
+- `SHORTS_STOCK_DIR`: folder scanned recursively for backdrop `*.mp4`. A
+  `data/stock/<niche>/` subfolder shadows the top-level pool for that niche.
+- `SHORTS_STOCK_SCRIPT_PATH`: optional file, one script per line; absent = a
+  deterministic built-in quote bank (seeded per run, stable across re-runs).
+- `SHORTS_VO_ENABLED` is required for stock mode (the TTS is the voice track).
+- Voice is auto-picked by script language (e.g. Russian → `ru-RU-DmitryNeural`).
+- Rendered clips land in `outputs/` (copy), like every factory result.
+
 ## Factory runner (multi-channel)
 
 Autonomous batch runner that rotates one factory round per channel:

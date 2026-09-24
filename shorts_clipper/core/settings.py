@@ -124,6 +124,9 @@ class Settings:
     game_name: str = "cs2"
     game_label: str = "Counter-Strike 2"
     game_hashtags: list[str] = field(default_factory=lambda: ["#cs2", "#counterstrike2"])
+    visual_mode: str = "clip"  # "clip" | "stock"
+    stock_dir: str = "data/stock"
+    stock_script_path: str | None = None
 
     @property
     def channel_token_dir(self) -> Path:
@@ -568,4 +571,7 @@ class Settings:
             game_name=game_name,
             game_label=game_label,
             game_hashtags=game_hashtags,
+            visual_mode=_env("SHORTS_VISUAL_MODE", file_values, "clip") or "clip",
+            stock_dir=_env("SHORTS_STOCK_DIR", file_values, "data/stock") or "data/stock",
+            stock_script_path=_env("SHORTS_STOCK_SCRIPT_PATH", file_values) or None,
         )

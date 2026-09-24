@@ -1179,6 +1179,19 @@ def run_autopilot(
         settings = Settings.from_env()
 
     log.info(f"RUNNER RECEIVED:\nniche={niche}\nkeyword={keyword}")
+
+    if getattr(settings, "visual_mode", "clip") == "stock":
+        from shorts_clipper.pipeline.stock_runner import run_stock_short
+
+        return run_stock_short(
+            settings=settings,
+            niche=niche,
+            count=count,
+            upload=upload,
+            privacy=privacy,
+            progress_callback=progress_callback,
+        )
+
     log.info("🤖 AUTOPILOT MODE: Scouting trending content...")
     if progress_callback:
         progress_callback(5)

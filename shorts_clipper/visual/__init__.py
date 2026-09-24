@@ -1,0 +1,1 @@
+"""Stock-visual assembly: backgrounds, Ken-Burns motion, script-driven shorts."""
