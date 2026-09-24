@@ -24,6 +24,44 @@ log = logging.getLogger(__name__)
 
 _tts_lock = threading.Lock()
 
+# Maps a detected language to an edge-tts voice. Keep the default English
+# voice as the reserved fallback so existing configs keep working.
+VOICE_BY_LANG: dict[str, str] = {
+    "en": "en-US-GuyNeural",
+    "ru": "ru-RU-DmitryNeural",
+    "de": "de-DE-ConradNeural",
+    "fr": "fr-FR-HenriNeural",
+    "es": "es-ES-AlvaroNeural",
+    "it": "it-IT-DiegoNeural",
+    "pt": "pt-BR-AntonioNeural",
+}
+
+DEFAULT_VOICE = "en-US-GuyNeural"
+
+
+def _detect_language(text: str) -> str:
+    """Rough cyrillic/latin language hint for voice selection."""
+    if not text:
+        return "en"
+    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
+    cyrillic = sum(1 for ch in text if "\u0400" <= ch <= "\u04FF")
+    if cyrillic > latin:
+        return "ru"
+    return "en"
+
+
+def pick_voice(text: str, configured: str | None = None) -> str:
+    """Choose an edge-tts voice.
+
+    Honors an explicit ``configured`` voice when it differs from the default,
+    otherwise auto-picks by detected language.
+    """
+    lang = _detect_language(text)
+    auto = VOICE_BY_LANG.get(lang, VOICE_BY_LANG["en"])
+    if not configured or configured == DEFAULT_VOICE:
+        return auto
+    return configured
+
 
 def _edge_tts_command() -> list[str]:
     """Return the invokable edge-tts command.
@@ -82,12 +120,13 @@ def build_voiceover_text(
 def synthesize_voiceover(
     text: str,
     out_path: Path,
-    voice: str = "en-US-GuyNeural",
+    voice: str | None = None,
     rate: str = "+8%",
 ) -> Path | None:
     """Synthesise *text* into a WAV file via edge-tts.
 
-    Uses a module-level lock to serialise concurrent calls.  Returns the
+    Uses a module-level lock to serialise concurrent calls.  ``voice`` may be
+    ``None`` to auto-select by detected text language.  Returns the
     output ``Path`` on success or ``None`` if edge-tts is unavailable /
     any error occurs.
     """
@@ -101,12 +140,14 @@ def synthesize_voiceover(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    effective_voice = voice or pick_voice(text)
+
     try:
         with _tts_lock:
             result = subprocess.run(
                 [*_edge_tts_command(),
                     "--voice",
-                    voice,
+                    effective_voice,
                     "--rate",
                     rate,
                     "--text",
