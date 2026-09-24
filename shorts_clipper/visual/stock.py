@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import subprocess
 from pathlib import Path
 
@@ -28,28 +29,152 @@ _TARGET_W = 1080
 _TARGET_H = 1920
 _FPS = 30
 
-# Built-in quotes when no script file is configured. Sorted by rough
-# language so the TTS voice picker can align with the text.
+# Built-in quotes when no script file is configured. Pure Russian so the
+# auto-picked Edge TTS voice (ru-RU) matches the spoken text every time.
+# Written like hooks, not affirmations: direct address, emotional contrast,
+# a sting in the first few words — the viewer must feel seen in 2 seconds.
 _DEFAULT_SCRIPTS: list[str] = [
-    "Ты не то, что с тобой случилось. Ты то, что ты решил стать.",
-    "Дисциплина — это выбор между тем, чего ты хочешь сейчас, и тем, чего ты хочешь больше всего.",
-    "Стоицизм не про подавление эмоций. Он про то, что действительно имеет значение.",
-    "Хочешь изменить жизнь — начни с утра, которое ты контролируешь.",
-    "Одиночество — это не пустота. Это пространство, где рождается ты.",
-    "The obstacle is the way. Препятствие — это и есть путь.",
-    "Сила — это спокойствие, которое остаётся, когда всё остальное кричит.",
-    "Маленькие шаги каждый день. Огромная разница за год.",
-    "Ты не можешь управлять ветром. Но можешь настроить паруса.",
-    "Чем больше ты практикуешь тишину, тем яснее слышишь себя.",
+    "Ты не сдался. Ты просто перестал нажимать — продолжить.",
+    "Ты врешь, что тебе всё равно. Если бы было всё равно, ты бы не дочитал.",
+    "Ты не ленивый. Ты тратишь все силы на чужие требования и ничего не оставляешь себе.",
+    "Дело не в мотивации. Дело в том, что тебе надоело быть версией себя, которую ты не выбирал.",
+    "Каждое утро ты выбираешь: проснуться своей жизнью или чужой.",
+    "Они назовут это удачей. Удача не встаёт в пять утра, пока все спят — это ты.",
+    "Ты не боишься провала. Ты боишься, что даже стараться бессмысленно. Это и есть ложь.",
+    "Никто не придёт. Это не грустно. Это твой шанс.",
+    "Твои 23:00 — это твой завтрашний 06:00. Тело уже считает.",
+    "Ты не устал. Ты перестал драться за то, во что веришь в два часа ночи.",
+    "Самая дорогая валюта — не деньги. Это уверенность, которую ты отдал чужому мнению.",
+    "Ты сам себе либо самый жёсткий критик, либо самый надёжный союзник. Выбери, с кем дружить.",
+    "Когда ты перестанешь себя жалеть, начнётся то, что ты заслужил.",
+    "Тебе не нужен новый год. Тебе нужен душ и один несделанный звонок.",
+    "Злость — это твоя сила, которую ты раздал бесплатно. Забери её.",
+    "Потом уже живёт тот, кто решил сегодня.",
 ]
 
+# Background search terms per niche, so Pexels photos complement the topic
+# (Portrait videos only — 1080×1920 is requested downstream).
+PEXELS_QUERY_BY_NICHE: dict[str, str] = {
+    "self-growth": "morning sunrise forest calm",
+    "philosophy": "minimal ocean horizon dawn",
+    "motivation": "mountain peak sky sunrise",
+    "lifestyle": "city night walking lights",
+    "nature": "nature slow motion green",
+}
 
-def find_stock_background(stock_dir: str | Path, niche: str | None = None, seed: int = 0) -> Path | None:
-    """Pick a background MP4 from the stock folder, favouring the niche subfolder.
+_PEXELS_CACHE_SUBDIR = "_pexels_cache"
+_PEXELS_LIMIT = 5  # max cached videos per query slug
 
-    The niche subfolder (``<stock_dir>/<niche>/``) shadows the top-level folder
-    when it contains at least one MP4, so per-niche asset libraries stay clean.
+
+def _local_backgrounds(stock_dir: str | Path, niche: str | None) -> list[Path]:
+    """All local MP4s for *niche* (niche subfolder preferred, else top-level)."""
+    base = Path(stock_dir)
+    if niche:
+        sub = base / niche
+        if sub.is_dir():
+            niche_files = sorted(p for p in sub.glob("*.mp4") if p.is_file())
+            if niche_files:
+                return niche_files
+    if base.is_dir():
+        return sorted(p for p in base.glob("*.mp4") if p.is_file())
+    return []
+
+
+def ensure_pexels_cache(
+    stock_dir: str | Path,
+    niche: str | None,
+    api_key: str,
+    *,
+    limit: int = _PEXELS_LIMIT,
+) -> list[Path]:
+    """Return the cached Pexels pool for *niche*, downloading on first fill.
+
+    Videos are cached under ``<stock_dir>/_pexels_cache/<slug>/`` and reused
+    forever, so a full pipeline run (and CI) stays offline after one warm-up.
     """
+    query = PEXELS_QUERY_BY_NICHE.get((niche or "").strip().lower(), "morning sunrise calm")
+    slug = re.sub(r"[^a-z0-9-]+", "-", query.lower()).strip("-")
+    cache_dir = Path(stock_dir) / _PEXELS_CACHE_SUBDIR / slug
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cached = sorted(p for p in cache_dir.glob("*.mp4") if p.is_file())
+    if not cached and api_key:
+        _download_pexels_videos(query, cache_dir, api_key, limit)
+        cached = sorted(p for p in cache_dir.glob("*.mp4") if p.is_file())
+    return cached
+
+
+def fetch_pexels_background(
+    stock_dir: str | Path,
+    niche: str | None,
+    seed: int = 0,
+    *,
+    api_key: str = "",
+    limit: int = _PEXELS_LIMIT,
+) -> Path | None:
+    """Return a seed-deterministic Pexels video for *niche* (or ``None``)."""
+    pool = ensure_pexels_cache(stock_dir, niche, api_key, limit=limit)
+    if not pool:
+        return None
+    return random.Random(seed).choice(pool)
+
+
+def list_stock_backgrounds(
+    stock_dir: str | Path,
+    niche: str | None = None,
+    seed: int = 0,
+    *,
+    pexels_api_key: str = "",
+    limit: int = _PEXELS_LIMIT,
+) -> list[Path]:
+    """Seed-deterministic pool of distinct backdrop videos for *niche*.
+
+    Local files win; the Pexels cache tops up the pool when the local folder
+    is short.  Used by the montage renderer so each short mixes several
+    different clips with cross-fades.
+    """
+    pool = _local_backgrounds(stock_dir, niche)
+    if len(pool) < limit and pexels_api_key:
+        extra = ensure_pexels_cache(
+            stock_dir, niche, pexels_api_key, limit=limit - len(pool)
+        )
+        for p in extra:
+            if p not in pool:
+                pool.append(p)
+    if not pool:
+        return []
+    return random.Random(seed).sample(pool, min(limit, len(pool)))
+
+
+def find_stock_background(
+    stock_dir: str | Path,
+    niche: str | None = None,
+    seed: int = 0,
+    pexels_api_key: str = "",
+) -> Path | None:
+    """Pick a background MP4 for a short.
+
+    Priority:
+      1. local ``<stock_dir>/<niche>/*.mp4`` (niche subfolder shadows base)
+      2. local ``<stock_dir>/*.mp4``
+      3. Pexels cache (auto-refilled from the API when *pexels_api_key* set)
+
+    Returns ``None`` when nothing is available — callers fall back to a
+    procedural gradient render.
+    """
+    local = _find_local_background(stock_dir, niche, seed)
+    if local is not None:
+        return local
+
+    return fetch_pexels_background(
+        stock_dir,
+        niche,
+        seed,
+        api_key=pexels_api_key,
+    )
+
+
+def _find_local_background(stock_dir: str | Path, niche: str | None, seed: int) -> Path | None:
     base = Path(stock_dir)
     rng = random.Random(seed)
 
@@ -66,6 +191,195 @@ def find_stock_background(stock_dir: str | Path, niche: str | None = None, seed:
             return rng.choice(base_files)
 
     return None
+
+
+def _montage_plan(n: int, duration: float, fade: float = 0.9, seed: int = 0) -> dict:
+    """Compute t/offsets/transitions for an n-clip crossfade montage.
+
+    Each source clip lasts *t* seconds; consecutive clips overlap by *fade*
+    via xfade, so the total is  n*t - (n-1)*f ≈ *duration*.  Only soft,
+    non-slicing transitions are used so the cut never feels harsh.
+    """
+    dur = max(duration, n * fade)
+    t = (dur + (n - 1) * fade) / n
+    transitions: list[tuple[float, str]] = []
+    rng = random.Random(seed)
+    kinds = ["fade", "dissolve", "smoothleft", "smoothup"]
+    for k in range(1, n):
+        offset = k * (t - fade)
+        transitions.append((offset, rng.choice(kinds)))
+    return {
+        "clip_duration": t,
+        "fade": fade,
+        "transitions": transitions,
+        "total": n * t - (n - 1) * fade,
+    }
+
+
+def render_stock_background_montage(
+    clips: list[Path],
+    work_dir: Path,
+    out_path: Path,
+    duration: float,
+    *,
+    seed: int = 0,
+    video_codec: str = "libx264",
+    preset: str = "ultrafast",
+) -> Path:
+    """Render a multi-clip background: several videos blended with cross-fades.
+
+    Every clip is normalized to 1080×1920@30fps, trimmed to an even segment,
+    then chained with ``xfade`` transitions (fade/dissolve/slide variants).  A
+    quiet stereo audio bed is included for downstream ``[0:a]`` mixing.
+    """
+    out_path = Path(out_path)
+    plan = _montage_plan(len(clips), duration, seed=seed)
+    t = plan["clip_duration"]
+    fade = plan["fade"]
+
+    inputs: list[str] = []
+    for clip in clips:
+        inputs += ["-i", str(clip)]
+
+    prep: list[str] = []
+    for i in range(len(clips)):
+        prep.append(
+            f"[{i}:v]scale={_TARGET_W}:{_TARGET_H}:force_original_aspect_ratio=increase,"
+            f"crop={_TARGET_W}:{_TARGET_H},setpts=PTS-STARTPTS,trim=duration={t:.3f},"
+            f"setpts=PTS-STARTPTS,fps={_FPS},format=yuv420p[v{i}]"
+        )
+
+    chain: list[str] = []
+    prev = "[v0]"
+    for k, (offset, kind) in enumerate(plan["transitions"], start=1):
+        out_label = f"[x{k}]"
+        chain.append(
+            f"{prev}[v{k}]xfade=transition={kind}:duration={fade:.3f}:"
+            f"offset={offset:.3f}{out_label}"
+        )
+        prev = out_label
+    final_video = prev
+
+    filter_complex = ";".join(prep + chain)
+    audio_idx = len(clips)
+    cmd = [
+        ffmpeg_path(),
+        "-y",
+        *inputs,
+        "-f",
+        "lavfi",
+        "-t",
+        f"{duration:.3f}",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        final_video,
+        "-map",
+        f"{audio_idx}:a",
+        "-t",
+        f"{duration:.3f}",
+        "-c:v",
+        video_codec,
+    ]
+    if video_codec == "libx264":
+        cmd.extend(["-crf", "24", "-preset", preset])
+    else:
+        cmd.extend(["-preset", preset])
+    cmd.extend(
+        [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out_path),
+        ]
+    )
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0 or not out_path.is_file():
+        log.error("Stock montage render failed:\n%s", result.stderr[-3000:])
+        raise RuntimeError(f"Stock montage render failed (exit {result.returncode})")
+    log.info(
+        "✅ Stock montage background (%d clips, %.1fs) → %s",
+        len(clips),
+        duration,
+        out_path,
+    )
+    return out_path
+
+
+def _download_pexels_videos(query: str, cache_dir: Path, api_key: str, limit: int) -> list[Path]:
+    """Query Pexels *videos/search* and download up to *limit* portrait MP4s."""
+    import httpx
+
+    log.info("Pexels: fetching '%s' (%d videos)...", query, limit)
+    headers = {"Authorization": api_key}
+    try:
+        resp = httpx.get(
+            "https://api.pexels.com/videos/search",
+            params={
+                "query": query,
+                "orientation": "portrait",
+                "per_page": min(limit * 2, 20),
+                "size": "medium",
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        videos = (resp.json() or {}).get("videos") or []
+    except Exception as exc:
+        log.error("Pexels search failed: %s", exc)
+        return []
+
+    saved: list[Path] = []
+    for idx, video in enumerate(videos):
+        if len(saved) >= limit:
+            break
+        files = video.get("video_files") or []
+        target = None
+        # Prefer an MP4 that is at least portrait-FHD, else the largest file.
+        for f in files:
+            if not (f.get("file_type") or "").startswith("video/mp4"):
+                continue
+            _w, h = f.get("width") or 0, f.get("height") or 0
+            if h >= 1920:
+                target = f
+                break
+        if target is None and files:
+            target = sorted(
+                files,
+                key=lambda f: (f.get("height") or 0) * (f.get("width") or 0),
+                reverse=True,
+            )[0]
+        if target is None:
+            continue
+        link = target.get("link")
+        if not link:
+            continue
+        out_path = cache_dir / f"{idx:02d}.mp4"
+        try:
+            with httpx.stream("GET", link, follow_redirects=True, timeout=120) as dl:
+                dl.raise_for_status()
+                with open(out_path, "wb") as fh:
+                    for chunk in dl.iter_bytes(chunk_size=1 << 16):
+                        fh.write(chunk)
+            if out_path.stat().st_size > 100_000:
+                saved.append(out_path)
+                log.info("Pexels: cached %s (%.1f MB)", out_path.name, out_path.stat().st_size / 1e6)
+        except Exception as exc:
+            log.error("Pexels download failed for %s: %s", link, exc)
+            try:
+                out_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+    return saved
 
 
 def load_stock_script(script_path: str | Path | None, seed: int = 0) -> str:
@@ -126,6 +440,66 @@ def build_word_segments(text: str, duration: float, max_words: int = 4) -> list[
         )
         current = seg_end
     return segments
+
+
+def speech_window(
+    audio_path: Path,
+    threshold_db: float = -35.0,
+    min_silence: float = 0.4,
+) -> tuple[float, float] | None:
+    """Locate the actual speech window of *audio_path* via silencedetect.
+
+    TTS files start with a small lead-in silence and end with a longer tail.
+    Captions should span exactly the audible part, so words match what the
+    viewer hears instead of drifting against a silent intro/outro.  Returns
+    ``(start, end)`` in seconds or ``None`` when no speech is detected.
+    """
+    cmd = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-i",
+        str(audio_path),
+        "-af",
+        f"silencedetect=noise={threshold_db}dB:d={min_silence}",
+        "-f",
+        "null",
+        "-",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        log.warning("silencedetect failed on %s", audio_path)
+        return None
+
+    silence_starts: list[float] = []
+    silence_ends: list[float] = []
+    for line in result.stderr.splitlines():
+        line = line.strip()
+        try:
+            if "silence_start" in line:
+                silence_starts.append(float(line.rsplit(":", 1)[1].strip()))
+            elif "silence_end" in line:
+                silence_ends.append(float(line.rsplit("|", 1)[0].split(":", 1)[1].strip()))
+        except ValueError:
+            continue
+
+    if not silence_starts and not silence_ends:
+        return None
+
+    # silencedetect emits alternating silence_start / silence_end events, so
+    # zip them into [start, end] silent intervals in order.
+    intervals = list(zip(silence_starts, silence_ends, strict=False))
+
+    # Speech window = envelope spanning all non-silent audio (mid-sentence
+    # pauses are included so captions only float a little on natural breaks).
+    if intervals and intervals[0][0] <= 0.05:
+        speech_start = intervals[0][1]
+    else:
+        speech_start = 0.0
+    speech_end = intervals[-1][0] if intervals else speech_start
+
+    if speech_end <= speech_start + 0.3:
+        return None
+    return speech_start, speech_end
 
 
 def _extract_background_frame(bg: Path, work_dir: Path) -> Path:

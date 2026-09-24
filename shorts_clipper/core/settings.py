@@ -111,6 +111,7 @@ class Settings:
     vo_enabled: bool = False
     vo_voice: str = "en-US-GuyNeural"
     vo_rate: str = "+8%"
+    vo_pitch: str = ""  # edge-tts pitch arg, e.g. "+4Hz" — less robotic voice
     channel_name: str | None = None
     channel_creds_dir: str = "data/creds"
     metrics_path: Path = Path("data/metrics.sqlite")
@@ -127,6 +128,7 @@ class Settings:
     visual_mode: str = "clip"  # "clip" | "stock"
     stock_dir: str = "data/stock"
     stock_script_path: str | None = None
+    pexels_api_key: str = ""
 
     @property
     def channel_token_dir(self) -> Path:
@@ -554,6 +556,7 @@ class Settings:
             vo_voice=_env("SHORTS_VO_VOICE", file_values, "en-US-GuyNeural")
             or "en-US-GuyNeural",
             vo_rate=_env("SHORTS_VO_RATE", file_values, "+8%") or "+8%",
+            vo_pitch=_env("SHORTS_VO_PITCH", file_values) or "",
             channel_name=channel,
             channel_creds_dir=_env("SHORTS_CHANNEL_CREDS_DIR", file_values, "data/creds")
             or "data/creds",
@@ -574,4 +577,5 @@ class Settings:
             visual_mode=_env("SHORTS_VISUAL_MODE", file_values, "clip") or "clip",
             stock_dir=_env("SHORTS_STOCK_DIR", file_values, "data/stock") or "data/stock",
             stock_script_path=_env("SHORTS_STOCK_SCRIPT_PATH", file_values) or None,
+            pexels_api_key=_env("SHORTS_PEXELS_API_KEY", file_values) or "",
         )

@@ -122,11 +122,14 @@ def synthesize_voiceover(
     out_path: Path,
     voice: str | None = None,
     rate: str = "+8%",
+    pitch: str | None = None,
 ) -> Path | None:
     """Synthesise *text* into a WAV file via edge-tts.
 
     Uses a module-level lock to serialise concurrent calls.  ``voice`` may be
-    ``None`` to auto-select by detected text language.  Returns the
+    ``None`` to auto-select by detected text language.  ``rate`` (speed,
+    ``"+8%"``) and ``pitch`` (e.g. ``"+4Hz"``) tune expressiveness — a slight
+    positive pitch makes Neural voices sound less robotic.  Returns the
     output ``Path`` on success or ``None`` if edge-tts is unavailable /
     any error occurs.
     """
@@ -140,32 +143,228 @@ def synthesize_voiceover(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # edge-tts always streams MP3 regardless of the file extension, so write
+    # to a temp path first and transcode into a real WAV (downstream duration
+    # probing, speech windows and AMIX all assume a valid wave container).
+    import os
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(suffix=".mp3", prefix="edgetts_")
+    os.close(fd)
+    tmp_media = Path(tmp_name)
     effective_voice = voice or pick_voice(text)
+
+    cmd = [
+        *_edge_tts_command(),
+        "--voice",
+        effective_voice,
+        "--rate",
+        rate,
+        "--text",
+        text.strip(),
+        "--write-media",
+        str(tmp_media),
+    ]
+    if pitch:
+        cmd += ["--pitch", pitch]
 
     try:
         with _tts_lock:
             result = subprocess.run(
-                [*_edge_tts_command(),
-                    "--voice",
-                    effective_voice,
-                    "--rate",
-                    rate,
-                    "--text",
-                    text.strip(),
-                    "--write-media",
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0 or not tmp_media.is_file():
+                log.warning(
+                    "edge-tts failed (exit %d): %s",
+                    result.returncode,
+                    result.stderr[:500],
+                )
+                return None
+
+            from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+
+            convert = subprocess.run(
+                [
+                    ffmpeg_path(),
+                    "-y",
+                    "-i",
+                    str(tmp_media),
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "pcm_s16le",
                     str(out_path),
                 ],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=120,
             )
-            if result.returncode != 0:
-                log.warning("edge-tts failed (exit %d): %s", result.returncode, result.stderr[:500])
-                return None
-            if not out_path.is_file():
-                log.warning("edge-tts did not produce output file: %s", out_path)
+            if convert.returncode != 0 or not out_path.is_file():
+                log.warning(
+                    "TTS transcode to WAV failed (exit %d): %s",
+                    convert.returncode,
+                    convert.stderr[-500:],
+                )
                 return None
             return out_path
     except Exception:
         log.warning("edge-tts synthesis raised an exception", exc_info=True)
         return None
+    finally:
+        try:
+            tmp_media.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _edge_tts_library_available() -> bool:
+    """True when the edge_tts *library* (not just the CLI) is importable."""
+    try:
+        import edge_tts  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _synthesize_audio_bytes(
+    text: str,
+    voice: str | None,
+    rate: str,
+    pitch: str | None,
+) -> tuple[bytes | None, list]:
+    """Synthesise *text* via the edge_tts library, capturing word boundaries.
+
+    Returns ``(mp3_bytes, word_boundaries)`` where each boundary item is
+    ``(word, start_seconds, end_seconds)`` matched to the audible speech,
+    rather than a uniform grid.  ``offset``/``duration`` delivered by
+    edge-tts are in 100ns ticks, so they are converted to seconds.
+    """
+
+    async def _run():
+        try:
+            import edge_tts
+        except Exception:
+            return None, []
+
+        try:
+            kwargs = {"voice": voice or pick_voice(text), "rate": rate}
+            if pitch:
+                kwargs["pitch"] = pitch
+            communicate = edge_tts.Communicate(text=text, boundary="WordBoundary", **kwargs)
+        except TypeError:
+            communicate = edge_tts.Communicate(text=text, voice=voice or pick_voice(text), rate=rate)
+        audio = bytearray()
+        boundaries: list = []
+        try:
+            async for chunk in communicate.stream():
+                ctype = chunk.get("type")
+                if ctype == "audio":
+                    data = chunk.get("data") or chunk.get("raw") or b""
+                    if data:
+                        audio += data
+                elif ctype in ("WordBoundary", "word_boundary"):
+                    start = secs(chunk.get("offset"))
+                    end = secs(chunk.get("duration")) + start
+                    word = chunk.get("text")
+                    if word is not None and end > start:
+                        boundaries.append((word, start, end))
+        except Exception:
+            log.warning("edge_tts streaming failed", exc_info=True)
+            return None, []
+        return bytes(audio), boundaries
+
+    def secs(ticks) -> float:
+        try:
+            return float(ticks) / 10_000_000.0
+        except Exception:
+            return 0.0
+
+    return asyncio_run(_run())
+
+
+def asyncio_run(coro):
+    import asyncio
+
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+def synthesize_voiceover_boundaries(
+    text: str,
+    out_path: Path,
+    voice: str | None = None,
+    rate: str = "+8%",
+    pitch: str | None = None,
+):
+    """Synthesise *text* to WAV and return spoken word boundaries.
+
+    Returns ``(wav_path, [(word, start_s, end_s), ...])``.  Falls back to the
+    plain CLI synthesis returning ``(wav_path, [])`` when the library is
+    missing or the stream yields no boundaries; returns ``(None, [])`` on
+    failure.
+    """
+    if not text or not text.strip():
+        return None, []
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    audio, boundaries = (None, [])
+    if _edge_tts_library_available():
+        audio, boundaries = _synthesize_audio_bytes(text, voice, rate, pitch)
+
+    if audio is None or not audio:
+        synth = synthesize_voiceover(text, out_path, voice=voice, rate=rate, pitch=pitch)
+        return (synth, []) if synth else (None, [])
+
+    import os
+    import subprocess
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(suffix=".mp3", prefix="edgetts_")
+    os.close(fd)
+    tmp_media = Path(tmp_name)
+    try:
+        tmp_media.write_bytes(audio)
+        from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+
+        convert = subprocess.run(
+            [
+                ffmpeg_path(),
+                "-y",
+                "-i",
+                str(tmp_media),
+                "-ar",
+                "48000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if convert.returncode != 0 or not out_path.is_file():
+            log.warning("edge_tts transcode to WAV failed (exit %d)", convert.returncode)
+            synth = synthesize_voiceover(text, out_path, voice=voice, rate=rate, pitch=pitch)
+            return (synth, []) if synth else (None, [])
+        return out_path, boundaries
+    finally:
+        try:
+            tmp_media.unlink(missing_ok=True)
+        except Exception:
+            pass

@@ -73,13 +73,25 @@ def run_stock_short(
             # 1. Script line for this short.
             script = stock_visual.load_stock_script(settings.stock_script_path, seed)
 
-            # 2. AI voiceover determines the clip duration.
-            from shorts_clipper.audio.tts import synthesize_voiceover
+            # 2. AI voiceover determines the clip duration.  Word timing is
+            #    captured from edge-tts word boundaries so subtitles follow the
+            #    actual speech instead of a uniform grid.
+            from shorts_clipper.audio.tts import synthesize_voiceover_boundaries
             from shorts_clipper.captions.music import track_duration
 
             vo_path = clip_work_dir / "vo.wav"
-            vo_path = synthesize_voiceover(
-                script, vo_path, voice=None, rate=settings.vo_rate
+            # For motivational stock shorts a natural pacing reads far better
+            # than the global fast default; explicit SHORTS_VO_RATE still wins.
+            stock_rate = "+0%"
+            if settings.vo_rate not in ("", "+8%"):
+                stock_rate = settings.vo_rate
+
+            vo_path, word_bounds = synthesize_voiceover_boundaries(
+                script,
+                vo_path,
+                voice=None,
+                rate=stock_rate,
+                pitch=settings.vo_pitch or "+3Hz",
             )
             if vo_path is None:
                 log.error("Stock short needs an AI voiceover (SHORTS_VO_ENABLED). Skipping.")
@@ -87,15 +99,65 @@ def run_stock_short(
             speak_duration = track_duration(vo_path) or 8.0
             render_duration = speak_duration + 1.2  # tail room
 
-            # 3. Word timing for subtitles (evenly spread over the voice).
-            segments = stock_visual.build_word_segments(script, speak_duration)
+            # 3. Build subtitle segments from real spoken word boundaries when
+            #    available; otherwise fall back to the uniform grid.
+            seg_shift = 0.0
+            speech = stock_visual.speech_window(vo_path)
+            if speech is not None:
+                seg_shift, speech_end = speech
+                effective_dur = max(0.5, speech_end - seg_shift)
+            else:
+                effective_dur = speak_duration
 
-            # 4. Background: local stock MP4, or a procedural gradient.
-            bg = stock_visual.find_stock_background(settings.stock_dir, actual_niche, seed)
+            if word_bounds and len(word_bounds) >= 2:
+                segments = _segments_from_word_bounds(
+                    word_bounds,
+                    seg_shift=seg_shift if seg_shift > 0.0 else 0.0,
+                )
+            else:
+                segments = stock_visual.build_word_segments(script, effective_dur)
+                if seg_shift > 0.0:
+                    from dataclasses import replace
+
+                    shifted: list = []
+                    for seg in segments:
+                        new_words = [
+                            replace(w, start=w.start + seg_shift, end=w.end + seg_shift)
+                            for w in (seg.words or [])
+                        ]
+                        shifted.append(
+                            replace(
+                                seg,
+                                start=seg.start + seg_shift,
+                                end=seg.end + seg_shift,
+                                words=new_words,
+                            )
+                        )
+                    segments = shifted
+
+            # 4. Background: montage of several stock clips, a single clip,
+            #    or a procedural gradient when nothing is available.
+            clips = stock_visual.list_stock_backgrounds(
+                settings.stock_dir,
+                actual_niche,
+                seed,
+                pexels_api_key=settings.pexels_api_key,
+                limit=4,
+            )
             bg_path = clip_work_dir / "background.mp4"
-            if bg is not None:
+            if len(clips) >= 2:
+                stock_visual.render_stock_background_montage(
+                    clips,
+                    clip_work_dir,
+                    bg_path,
+                    render_duration,
+                    seed=seed,
+                    video_codec=settings.video_codec,
+                    preset=settings.video_preset,
+                )
+            elif clips:
                 stock_visual.render_stock_background(
-                    bg,
+                    clips[0],
                     clip_work_dir,
                     bg_path,
                     render_duration,
@@ -225,6 +287,51 @@ def run_stock_short(
     if count == 1 and output_paths:
         return output_paths[0]
     return output_paths or None
+
+
+def _segments_from_word_bounds(
+    word_bounds: list,
+    seg_shift: float = 0.0,
+    words_per_seg: int = 3,
+):
+    """Build ``TranscriptSegment``s from real spoken word boundaries.
+
+    Groups consecutive words into short subtitle chunks (default 3 words)
+    using the exact edge-tts start/end times so on-screen text follows the
+    voice.  Applying *seg_shift* aligns the chunk window with the audible
+    speech envelope (the TTS file may carry silent intro/outro).
+    """
+    from shorts_clipper.core.models import TranscriptSegment, TranscriptWord
+
+    if not word_bounds:
+        return []
+    segments: list[TranscriptSegment] = []
+    for i in range(0, len(word_bounds), words_per_seg):
+        group = word_bounds[i : i + words_per_seg]
+        if not group:
+            break
+        words: list[TranscriptWord] = []
+        for w, start, end in group:
+            words.append(
+                TranscriptWord(
+                    start=max(0.0, start + seg_shift),
+                    end=max(0.0, end + seg_shift),
+                    word=w,
+                )
+            )
+        seg_start = min(w.start for w in words)
+        seg_end = max(w.end for w in words)
+        segments.append(
+            TranscriptSegment(
+                start=seg_start,
+                end=seg_end,
+                text=" ".join(w.word for w in words),
+                words=words,
+            )
+        )
+    if not segments:
+        return []
+    return segments
 
 
 def _build_stock_meta(settings, video_path, script, idx, niche) -> dict:
