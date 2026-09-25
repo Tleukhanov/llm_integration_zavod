@@ -9,7 +9,8 @@ __pycache__/
 models/
 outputs/
 .cache/
-data/
+data/*
+!data/niches/
 .pytest_cache/
 .ruff_cache/
 .env

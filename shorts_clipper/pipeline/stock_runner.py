@@ -46,7 +46,7 @@ def run_stock_short(
     if settings is None:
         settings = Settings.from_env()
 
-    actual_niche = (niche or "self-growth").strip().lower() or "self-growth"
+    actual_niche = (niche or settings.niche or "self-growth").strip().lower() or "self-growth"
     retention_grades = _refresh_retention_grades(settings)
     video_id = f"stock-{int(time.time())}"
 
@@ -71,7 +71,12 @@ def run_stock_short(
             seed = random.Random(f"{video_id}|{idx}").randrange(0, 0xFFFFFFFF)
 
             # 1. Script line for this short.
-            script = stock_visual.load_stock_script(settings.stock_script_path, seed)
+            script = stock_visual.load_stock_script(
+                settings.stock_script_path,
+                seed,
+                niche=actual_niche,
+                niche_dir=settings.niche_dir,
+            )
 
             # 2. AI voiceover determines the clip duration.  Word timing is
             #    captured from edge-tts word boundaries so subtitles follow the
@@ -143,6 +148,7 @@ def run_stock_short(
                 seed,
                 pexels_api_key=settings.pexels_api_key,
                 limit=4,
+                niche_dir=settings.niche_dir,
             )
             bg_path = clip_work_dir / "background.mp4"
             if len(clips) >= 2:

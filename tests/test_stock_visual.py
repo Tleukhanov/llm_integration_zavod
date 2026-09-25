@@ -173,6 +173,79 @@ class StockVisualTests(unittest.TestCase):
                 self.assertGreaterEqual(w.start, shift - 1e-6)
                 self.assertGreaterEqual(w.end, w.start)
 
+    def test_niche_query_from_profile_file(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            niche_dir = Path(d) / "niches"
+            money_dir = niche_dir / "money"
+            money_dir.mkdir(parents=True)
+            (money_dir / "pexels_query.txt").write_text(
+                "city skyline night\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                stock_visual.niche_query("money", niche_dir), "city skyline night"
+            )
+
+    def test_niche_query_falls_back_to_dict(self):
+        self.assertEqual(
+            stock_visual.niche_query("money", "does/not/exist"),
+            "city skyscraper business night",
+        )
+        self.assertEqual(
+            stock_visual.niche_query("nope", "does/not/exist"), "morning sunrise calm"
+        )
+
+    def test_niche_script_profile_beats_builtin(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            niche_dir = Path(d) / "niches"
+            rel_dir = niche_dir / "relationships"
+            rel_dir.mkdir(parents=True)
+            (rel_dir / "scripts.txt").write_text(
+                "# comment\nТы выбираешь себя сначала.\nТы не просишь, ты строишь.\n",
+                encoding="utf-8",
+            )
+            picked = stock_visual.load_stock_script(
+                None, seed=7, niche="relationships", niche_dir=niche_dir
+            )
+            self.assertIn(picked, ["Ты выбираешь себя сначала.", "Ты не просишь, ты строишь."])
+
+    def test_explicit_script_path_wins_over_niche_profile(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            niche_dir = Path(d) / "niches"
+            money_dir = niche_dir / "money"
+            money_dir.mkdir(parents=True)
+            (money_dir / "scripts.txt").write_text(
+                "Из профиля.\n", encoding="utf-8"
+            )
+            script_path = Path(d) / "override.txt"
+            script_path.write_text("Из явного пути.\n", encoding="utf-8")
+            picked = stock_visual.load_stock_script(
+                script_path, seed=0, niche="money", niche_dir=niche_dir
+            )
+            self.assertEqual(picked, "Из явного пути.")
+
+    def test_niche_script_profile_fallback_to_builtin_when_empty(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            niche_dir = Path(d) / "niches"
+            philo = niche_dir / "philosophy"
+            philo.mkdir(parents=True)
+            (philo / "scripts.txt").write_text("  \n", encoding="utf-8")
+            picked = stock_visual.load_stock_script(
+                None, seed=3, niche="philosophy", niche_dir=niche_dir
+            )
+            self.assertTrue(picked.strip())
+
+    def test_new_niches_present_in_query_map(self):
+        for niche in ("money", "relationships"):
+            self.assertIn(niche, stock_visual.PEXELS_QUERY_BY_NICHE)
+
 
 if __name__ == "__main__":
     unittest.main()

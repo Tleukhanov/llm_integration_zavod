@@ -129,6 +129,8 @@ class Settings:
     stock_dir: str = "data/stock"
     stock_script_path: str | None = None
     pexels_api_key: str = ""
+    niche: str = "self-growth"  # active stock niche, e.g. money / relationships
+    niche_dir: str = "data/niches"  # per-niche profiles: scripts.txt + pexels_query.txt
 
     @property
     def channel_token_dir(self) -> Path:
@@ -578,4 +580,6 @@ class Settings:
             stock_dir=_env("SHORTS_STOCK_DIR", file_values, "data/stock") or "data/stock",
             stock_script_path=_env("SHORTS_STOCK_SCRIPT_PATH", file_values) or None,
             pexels_api_key=_env("SHORTS_PEXELS_API_KEY", file_values) or "",
+            niche=(_env("SHORTS_NICHE", file_values, "self-growth") or "self-growth").strip().lower(),
+            niche_dir=_env("SHORTS_NICHE_DIR", file_values, "data/niches") or "data/niches",
         )

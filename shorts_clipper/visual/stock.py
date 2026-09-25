@@ -60,10 +60,43 @@ PEXELS_QUERY_BY_NICHE: dict[str, str] = {
     "motivation": "mountain peak sky sunrise",
     "lifestyle": "city night walking lights",
     "nature": "nature slow motion green",
+    "money": "city skyscraper business night",
+    "relationships": "couple silhouette sunset warm",
 }
 
 _PEXELS_CACHE_SUBDIR = "_pexels_cache"
 _PEXELS_LIMIT = 5  # max cached videos per query slug
+
+
+def niche_query(niche: str | None, niche_dir: str | Path = "data/niches") -> str:
+    """Return the Pexels query configured for *niche*."""
+    normalized = (niche or "").strip().lower() or "self-growth"
+    fallback = PEXELS_QUERY_BY_NICHE.get(normalized, "morning sunrise calm")
+    try:
+        profile = Path(niche_dir) / normalized / "pexels_query.txt"
+        for line in profile.read_text(encoding="utf-8").splitlines():
+            query = line.strip()
+            if query and not query.startswith("#"):
+                return query
+    except Exception:
+        return fallback
+    return fallback
+
+
+def niche_script_lines(niche: str | None, niche_dir: str | Path = "data/niches") -> list[str]:
+    """Return the script lines configured for *niche*."""
+    normalized = (niche or "").strip().lower() or "self-growth"
+    try:
+        profile = Path(niche_dir) / normalized / "scripts.txt"
+        if profile.is_file():
+            return [
+                line.strip()
+                for line in profile.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+    except Exception:
+        return []
+    return []
 
 
 def _local_backgrounds(stock_dir: str | Path, niche: str | None) -> list[Path]:
@@ -86,13 +119,14 @@ def ensure_pexels_cache(
     api_key: str,
     *,
     limit: int = _PEXELS_LIMIT,
+    niche_dir: str | Path = "data/niches",
 ) -> list[Path]:
     """Return the cached Pexels pool for *niche*, downloading on first fill.
 
     Videos are cached under ``<stock_dir>/_pexels_cache/<slug>/`` and reused
     forever, so a full pipeline run (and CI) stays offline after one warm-up.
     """
-    query = PEXELS_QUERY_BY_NICHE.get((niche or "").strip().lower(), "morning sunrise calm")
+    query = niche_query(niche, niche_dir)
     slug = re.sub(r"[^a-z0-9-]+", "-", query.lower()).strip("-")
     cache_dir = Path(stock_dir) / _PEXELS_CACHE_SUBDIR / slug
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -111,9 +145,12 @@ def fetch_pexels_background(
     *,
     api_key: str = "",
     limit: int = _PEXELS_LIMIT,
+    niche_dir: str | Path = "data/niches",
 ) -> Path | None:
     """Return a seed-deterministic Pexels video for *niche* (or ``None``)."""
-    pool = ensure_pexels_cache(stock_dir, niche, api_key, limit=limit)
+    pool = ensure_pexels_cache(
+        stock_dir, niche, api_key, limit=limit, niche_dir=niche_dir
+    )
     if not pool:
         return None
     return random.Random(seed).choice(pool)
@@ -126,6 +163,7 @@ def list_stock_backgrounds(
     *,
     pexels_api_key: str = "",
     limit: int = _PEXELS_LIMIT,
+    niche_dir: str | Path = "data/niches",
 ) -> list[Path]:
     """Seed-deterministic pool of distinct backdrop videos for *niche*.
 
@@ -136,7 +174,11 @@ def list_stock_backgrounds(
     pool = _local_backgrounds(stock_dir, niche)
     if len(pool) < limit and pexels_api_key:
         extra = ensure_pexels_cache(
-            stock_dir, niche, pexels_api_key, limit=limit - len(pool)
+            stock_dir,
+            niche,
+            pexels_api_key,
+            limit=limit - len(pool),
+            niche_dir=niche_dir,
         )
         for p in extra:
             if p not in pool:
@@ -151,6 +193,8 @@ def find_stock_background(
     niche: str | None = None,
     seed: int = 0,
     pexels_api_key: str = "",
+    *,
+    niche_dir: str | Path = "data/niches",
 ) -> Path | None:
     """Pick a background MP4 for a short.
 
@@ -171,6 +215,7 @@ def find_stock_background(
         niche,
         seed,
         api_key=pexels_api_key,
+        niche_dir=niche_dir,
     )
 
 
@@ -382,11 +427,17 @@ def _download_pexels_videos(query: str, cache_dir: Path, api_key: str, limit: in
     return saved
 
 
-def load_stock_script(script_path: str | Path | None, seed: int = 0) -> str:
+def load_stock_script(
+    script_path: str | Path | None,
+    seed: int = 0,
+    *,
+    niche: str | None = None,
+    niche_dir: str | Path = "data/niches",
+) -> str:
     """Return one spoken line for the next short.
 
-    When *script_path* points to an existing file, every non-empty,
-    non-comment line is a candidate.  Otherwise a built-in bank is used.
+    An existing *script_path* wins, followed by the niche profile and the
+    built-in bank.
     """
     if script_path:
         path = Path(script_path)
@@ -398,6 +449,10 @@ def load_stock_script(script_path: str | Path | None, seed: int = 0) -> str:
             ]
             if lines:
                 return random.Random(seed).choice(lines)
+
+    lines = niche_script_lines(niche, niche_dir)
+    if lines:
+        return random.Random(seed).choice(lines)
 
     return random.Random(seed).choice(_DEFAULT_SCRIPTS)
 

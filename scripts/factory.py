@@ -57,6 +57,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Output aspect ratio.")
     p.add_argument("--channel", default=None,
                    help="Channel profile name (sets SHORTS_CHANNEL for multi-channel env overlay).")
+    p.add_argument("--niche", default=None,
+                   help="Stock visual niche profile (e.g. self-growth, philosophy, money, relationships); "
+                        "defaults to SHORTS_NICHE env.")
     p.add_argument("--schedule-interval-min", type=int, default=0, dest="schedule_interval_min",
                    metavar="MINUTES",
                    help="Minutes between scheduled factory rounds (default: 0 = run once "
@@ -131,6 +134,7 @@ def _run_round(
     publish: bool,
     store: object,
     channel: str,
+    niche: str | None,
     daily_cap: int,
 ) -> tuple[int, int, int]:
     """Run one discovery + clip round. Returns (discovered, clipped, errors)."""
@@ -175,6 +179,7 @@ def _run_round(
                 count=count,
                 upload=can_publish,
                 privacy="public" if can_publish else "private",
+                niche=niche,
             )
             out_list = outputs if isinstance(outputs, list) else [outputs]
             print(f"        -> {len(out_list)} clip(s) generated")
@@ -201,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.channel:
         os.environ["SHORTS_CHANNEL"] = args.channel
+
+    if args.niche:
+        os.environ["SHORTS_NICHE"] = args.niche
 
     if args.title_variant >= 0:
         os.environ["SHORTS_TITLE_VARIANT"] = str(args.title_variant)
@@ -255,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
                 publish=args.publish,
                 store=store,
                 channel=channel,
+                niche=args.niche,
                 daily_cap=daily_cap,
             )
             print(

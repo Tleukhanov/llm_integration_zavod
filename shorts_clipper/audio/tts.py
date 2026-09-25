@@ -252,32 +252,37 @@ def _synthesize_audio_bytes(
         except Exception:
             return None, []
 
-        try:
-            kwargs = {"voice": voice or pick_voice(text), "rate": rate}
-            if pitch:
-                kwargs["pitch"] = pitch
-            communicate = edge_tts.Communicate(text=text, boundary="WordBoundary", **kwargs)
-        except TypeError:
-            communicate = edge_tts.Communicate(text=text, voice=voice or pick_voice(text), rate=rate)
-        audio = bytearray()
-        boundaries: list = []
-        try:
-            async for chunk in communicate.stream():
-                ctype = chunk.get("type")
-                if ctype == "audio":
-                    data = chunk.get("data") or chunk.get("raw") or b""
-                    if data:
-                        audio += data
-                elif ctype in ("WordBoundary", "word_boundary"):
-                    start = secs(chunk.get("offset"))
-                    end = secs(chunk.get("duration")) + start
-                    word = chunk.get("text")
-                    if word is not None and end > start:
-                        boundaries.append((word, start, end))
-        except Exception:
-            log.warning("edge_tts streaming failed", exc_info=True)
-            return None, []
-        return bytes(audio), boundaries
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            try:
+                kwargs = {"voice": voice or pick_voice(text), "rate": rate}
+                if pitch:
+                    kwargs["pitch"] = pitch
+                communicate = edge_tts.Communicate(text=text, boundary="WordBoundary", **kwargs)
+            except TypeError:
+                communicate = edge_tts.Communicate(text=text, voice=voice or pick_voice(text), rate=rate)
+            audio = bytearray()
+            boundaries: list = []
+            try:
+                async for chunk in communicate.stream():
+                    ctype = chunk.get("type")
+                    if ctype == "audio":
+                        data = chunk.get("data") or chunk.get("raw") or b""
+                        if data:
+                            audio += data
+                    elif ctype in ("WordBoundary", "word_boundary"):
+                        start = secs(chunk.get("offset"))
+                        end = secs(chunk.get("duration")) + start
+                        word = chunk.get("text")
+                        if word is not None and end > start:
+                            boundaries.append((word, start, end))
+            except Exception as exc:
+                last_exc = exc
+                continue
+            if audio:
+                return bytes(audio), boundaries
+        log.warning("edge_tts streaming failed after retries", exc_info=last_exc)
+        return None, []
 
     def secs(ticks) -> float:
         try:
