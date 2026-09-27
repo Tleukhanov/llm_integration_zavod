@@ -54,6 +54,17 @@ EMOTIONAL_TRIGGERS = {
     "КОШМАР",
 }
 
+# Fullscreen "edit mode" text flashes (e.g. "NEVER GIVE UP") layered on top of
+# the word subtitles. Kept in its own style so the caption styles stay intact.
+FLASH_STYLE_NAME = "Flash"
+FLASH_MAX_LINE_CHARS = 18
+_FLASH_EFFECT = r"{\fad(40,180)}"
+_FLASH_STYLE_DEF = (
+    f"{FLASH_STYLE_NAME},Montserrat Black,96,"
+    "&H00FFFFFF&,&H00FFFF00&,&H00000000&,&H80000000&,"
+    "-1,0,0,0,88,100,0,0,1,4,1.5,5,40,40,0,1"
+)
+
 # ---------------------------------------------------------------------------
 # ASS file generation
 # ---------------------------------------------------------------------------
@@ -71,8 +82,12 @@ def hex_to_ass_color(hex_str: str) -> str:
     return "&H00FFFFFF&"
 
 
-def _ass_header(style_name: str = "default") -> str:
-    """Build the ASS subtitle file header with custom style overrides."""
+def _ass_header(style_name: str = "default", include_flash: bool = False) -> str:
+    """Build the ASS subtitle file header with custom style overrides.
+
+    ``include_flash`` appends the extra fullscreen ``Flash`` style used for
+    text flashes; the caption style itself is untouched either way.
+    """
     style_format = (
         "Name, Fontname, Fontsize, PrimaryColour, SecondaryColour,"
         " OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,"
@@ -148,6 +163,10 @@ def _ass_header(style_name: str = "default") -> str:
         )
 
     event_format = "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    styles_block = [f"Style: {style_def}"]
+    if include_flash:
+        styles_block.append(f"Style: {_FLASH_STYLE_DEF}")
+
     return "\n".join(
         [
             "[Script Info]",
@@ -158,7 +177,7 @@ def _ass_header(style_name: str = "default") -> str:
             "",
             "[V4+ Styles]",
             f"Format: {style_format}",
-            f"Style: {style_def}",
+            *styles_block,
             "",
             "[Events]",
             f"Format: {event_format}",
@@ -255,18 +274,84 @@ def _build_ass_chunks(
     return chunks
 
 
+# ---------------------------------------------------------------------------
+# Fullscreen text flashes
+# ---------------------------------------------------------------------------
+
+
+def _clean_flash_text(text: str) -> str:
+    """Strip ASS control characters from a flash phrase."""
+    cleaned = re.sub(r"[{}\r\n\t]+", " ", text)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+def _wrap_flash_text(text: str) -> str:
+    """Break a long flash phrase onto two lines at the space nearest the middle."""
+    if len(text) <= FLASH_MAX_LINE_CHARS or " " not in text:
+        return text
+    mid = len(text) // 2
+    left = text.rfind(" ", 0, mid + 1)
+    right = text.find(" ", mid)
+    if left == -1:
+        split_at = right
+    elif right == -1:
+        split_at = left
+    else:
+        split_at = left if abs(left - mid) <= abs(right - mid) else right
+    if split_at <= 0:
+        return text
+    return f"{text[:split_at]}\\N{text[split_at + 1 :]}"
+
+
+def flash_events_to_ass(flash_events: list[dict], start_offset: float = 0.0) -> str:
+    """Render flash events as ``Dialogue:`` lines ready to append to an ASS file.
+
+    Each event is ``{"start": float, "end": float, "text": str}`` where both
+    timestamps are already relative to the clip start — ``start_offset`` is
+    only carried for call-site symmetry and is never added to them. Invalid or
+    fully out-of-clip events (non-positive duration) are dropped.
+    """
+    lines: list[str] = []
+    for event in flash_events or []:
+        try:
+            start = max(0.0, float(event["start"]))
+            end = float(event["end"])
+            text = _clean_flash_text(str(event["text"]))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            log.debug("Skipping malformed flash event: %r", event)
+            continue
+        if not text or end <= start:
+            log.debug("Skipping invalid flash event (%.3f -> %.3f): %s", start, end, text)
+            continue
+        wrapped = _wrap_flash_text(text)
+        lines.append(
+            f"Dialogue: 0,{_seconds_to_ass_time(start)},{_seconds_to_ass_time(end)},"
+            f"{FLASH_STYLE_NAME},,0,0,0,,{_FLASH_EFFECT}{wrapped}"
+        )
+    log.debug("Built %d flash Dialogue lines (start_offset=%.3f)", len(lines), start_offset)
+    return "\n".join(lines)
+
+
 def generate_ass_file(
     segments: list[TranscriptSegment],
     start_offset: float,
     output_path: str | Path,
     pacing: float = 1.0,
     style_name: str = "default",
+    flash_events: list[dict] | None = None,
 ) -> Path:
-    """Generate an ASS subtitle file from transcript segments."""
+    """Generate an ASS subtitle file from transcript segments.
+
+    ``flash_events`` is an optional list of ``{"start", "end", "text"}`` dicts
+    (seconds, already relative to the clip) rendered as fullscreen ``Flash``
+    text on top of the word subtitles. ``None`` or empty keeps the previous
+    word-only output byte for byte.
+    """
     out = Path(output_path)
     chunks = _build_ass_chunks(segments, start_offset, pacing=pacing)
 
-    lines = [_ass_header(style_name=style_name), ""]
+    flash_block = flash_events_to_ass(flash_events) if flash_events else ""
+    lines = [_ass_header(style_name=style_name, include_flash=bool(flash_block)), ""]
 
     highlight_colors = [
         "&H00E6E64D&",  # Soft Cyan (BGR)
@@ -301,6 +386,10 @@ def generate_ass_file(
             # Micro scale pop, fade in, and slight blur for premium feel
             effect = "{\\blur0.5\\fad(50,50)\\fscx110\\fscy110\\t(0,50,\\fscx100\\fscy100)}"
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{effect}{text}")
+
+    # Flashes go last so they render above the word subtitles.
+    if flash_block:
+        lines.append(flash_block)
 
     out.write_text("\n".join(lines), encoding="utf-8")
     log.debug("ASS file written: %s (%d chunks)", out, len(chunks))
@@ -370,6 +459,7 @@ def burn_subtitles(
     peak_second: float | None = None,
     hook_banner_text: str | None = None,
     vo_output_path: str | Path | None = None,
+    flash_events: list[dict] | None = None,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -409,6 +499,8 @@ def burn_subtitles(
                           fades out).  ``None`` or empty disables it.
         vo_output_path:   Optional voiceover WAV file mixed on top of game
                           audio for an extra original audio layer.
+        flash_events:     Optional list of {"start", "end", "text"} dicts
+                          rendered as fullscreen "Flash" text over the subtitles.
 
     Returns:
         Path to the output video.
@@ -449,7 +541,14 @@ def burn_subtitles(
 
     with tempfile.TemporaryDirectory(prefix="ass_") as tmp:
         ass_path = Path(tmp) / "subs.ass"
-        generate_ass_file(segments, start_offset, ass_path, pacing=pacing, style_name=style_name)
+        generate_ass_file(
+            segments,
+            start_offset,
+            ass_path,
+            pacing=pacing,
+            style_name=style_name,
+            flash_events=flash_events,
+        )
 
         # FFmpeg ASS filter — libass renders directly during encode
         # On Linux the path needs colons escaped

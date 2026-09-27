@@ -67,6 +67,18 @@ PEXELS_QUERY_BY_NICHE: dict[str, str] = {
 _PEXELS_CACHE_SUBDIR = "_pexels_cache"
 _PEXELS_LIMIT = 5  # max cached videos per query slug
 
+# Edit mode: cut spacing may only be a whole number of beats, and the visual
+# switch should land near a 1-2s shot length instead of the full 3.6s top end.
+_EDIT_SPACING_BEATS: tuple[int, ...] = (1, 2, 4, 8)
+# Down-beat flashes wait a beat-and-a-half before the first one lands.
+_EDIT_FLASH_LEAD = 0.3
+_EDIT_FLASH_PHRASES: list[str] = [
+    "NEVER GIVE UP",
+    "PUSH THROUGH",
+    "KEEP GOING",
+    "NO EXCUSES",
+]
+
 
 def niche_query(niche: str | None, niche_dir: str | Path = "data/niches") -> str:
     """Return the Pexels query configured for *niche*."""
@@ -357,6 +369,191 @@ def render_stock_background_montage(
         out_path,
     )
     return out_path
+
+
+def beat_seconds(bpm: float) -> float:
+    """Return the beat length in seconds for *bpm*."""
+    return 60.0 / bpm
+
+
+def _edit_cut_grid(
+    duration: float,
+    bpm: float = 132,
+    min_cut: float = 0.9,
+    seed: int = 0,
+) -> list[float]:
+    """Beat-quantized hard-cut grid: strictly increasing cut times in seconds.
+
+    Shot length is a whole number of beats (never a fractional drift), picked
+    as the candidate landing closest to *min_cut*.  The walk stops one full
+    beat before the end so no sliver segment is ever emitted.
+    """
+    if bpm <= 0 or duration <= 0:
+        return []
+    beat = beat_seconds(bpm)
+    best = min(_EDIT_SPACING_BEATS, key=lambda s: abs(s * beat - min_cut))
+    closest = abs(best * beat - min_cut)
+    tied = [s for s in _EDIT_SPACING_BEATS if abs(s * beat - min_cut) - closest < 1e-9]
+    spacing = random.Random(seed).choice(tied) if len(tied) > 1 else best
+
+    step = spacing * beat
+    cuts: list[float] = []
+    t = step
+    while t + beat <= duration - 0.01:
+        cuts.append(round(t, 3))
+        t += step
+    return cuts
+
+
+def render_stock_background_edit(
+    clips: list[Path],
+    work_dir: Path,
+    out_path: Path,
+    duration: float,
+    *,
+    bpm: float = 132,
+    seed: int = 0,
+    video_codec: str = "libx264",
+    preset: str = "ultrafast",
+) -> Path:
+    """Render a beat-synced background where clips snap-cut on the music.
+
+    Every boundary sits on a beat from :func:`_edit_cut_grid`; spare timeline is
+    spread over even extra cuts, and clips repeat cyclically until the whole
+    *duration* is covered.  Segments are chained with the ``concat`` filter
+    (hard cut, no transition) and a quiet stereo bed is muxed for downstream
+    ``[0:a]`` mixing.
+    """
+    out_path = Path(out_path)
+    if not clips or duration <= 0:
+        raise ValueError("render_stock_background_edit needs clips and a positive duration")
+
+    cuts = _edit_cut_grid(duration, bpm, min_cut=duration / len(clips), seed=seed)
+    needed = max(1, len(clips) - 1)
+    if len(cuts) < needed:
+        base = cuts[-1] if cuts else 0.0
+        chunk = (duration - base) / (needed - len(cuts) + 1)
+        for step_index in range(1, needed - len(cuts) + 1):
+            candidate = base + step_index * chunk
+            if base + 0.01 < candidate < duration - 0.01:
+                cuts.append(round(candidate, 3))
+
+    bounds = [0.0, *cuts, duration]
+    segments = [
+        (k % len(clips), bounds[k], bounds[k + 1])
+        for k in range(len(bounds) - 1)
+        if bounds[k + 1] - bounds[k] > 0.01
+    ]
+    if not segments:
+        raise ValueError("render_stock_background_edit produced no usable segments")
+
+    inputs: list[str] = []
+    for clip in clips:
+        inputs += ["-i", str(clip)]
+
+    prep: list[str] = []
+    for k, (src, _start, end) in enumerate(segments):
+        prep.append(
+            f"[{src}:v]scale={_TARGET_W}:{_TARGET_H}:force_original_aspect_ratio=increase,"
+            f"crop={_TARGET_W}:{_TARGET_H},setpts=PTS-STARTPTS,trim=duration={end - _start:.3f},"
+            f"setpts=PTS-STARTPTS,fps={_FPS},format=yuv420p[va{k}]"
+        )
+    chain = "".join(f"[va{k}]" for k in range(len(segments)))
+    filter_complex = ";".join(
+        prep + [f"{chain}concat=n={len(segments)}:v=1:a=0[m]", "[m]format=yuv420p[vout]"]
+    )
+    final_video = "[vout]"
+    audio_idx = len(clips)
+
+    cmd = [
+        ffmpeg_path(),
+        "-y",
+        *inputs,
+        "-f",
+        "lavfi",
+        "-t",
+        f"{duration:.3f}",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        final_video,
+        "-map",
+        f"{audio_idx}:a",
+        "-t",
+        f"{duration:.3f}",
+        "-c:v",
+        video_codec,
+    ]
+    if video_codec == "libx264":
+        cmd.extend(["-crf", "24", "-preset", preset])
+    else:
+        cmd.extend(["-preset", preset])
+    cmd.extend(
+        [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out_path),
+        ]
+    )
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0 or not out_path.is_file():
+        log.error("Stock edit render failed:\n%s", result.stderr[-3000:])
+        raise RuntimeError(f"Stock edit background render failed (exit {result.returncode})")
+    log.info(
+        "✅ Stock edit background (%d segments, %d clips, %.1fs) → %s",
+        len(segments),
+        len(clips),
+        duration,
+        out_path,
+    )
+    return out_path
+
+
+def edit_flash_schedule(
+    duration: float,
+    bpm: float = 132,
+    phrases: list[str] | None = None,
+    seed: int = 0,
+) -> list[dict]:
+    """Fullscreen text flashes pinned to down-beats, one per bar.
+
+    Each flash spans exactly one bar (4 beats) and is clipped to *duration*;
+    consecutive bars never repeat the same phrase.  Returns ``[]`` when the
+    timeline is shorter than a single bar.
+    """
+    if bpm <= 0 or duration <= 0:
+        return []
+    pool = [p for p in (_EDIT_FLASH_PHRASES if phrases is None else phrases) if p]
+    if not pool:
+        return []
+
+    bar = 4 * beat_seconds(bpm)
+    lead_bar = 1
+    while lead_bar * bar < _EDIT_FLASH_LEAD:
+        lead_bar += 1
+
+    rng = random.Random(seed)
+    flashes: list[dict] = []
+    previous = ""
+    bar_index = lead_bar
+    while bar_index * bar < duration:
+        start = bar_index * bar
+        end = min(duration, start + bar)
+        options = [p for p in pool if p != previous] or pool
+        text = rng.choice(options)
+        previous = text
+        flashes.append({"start": round(start, 3), "end": round(end, 3), "text": text})
+        bar_index += 1
+    return flashes
 
 
 def _download_pexels_videos(query: str, cache_dir: Path, api_key: str, limit: int) -> list[Path]:

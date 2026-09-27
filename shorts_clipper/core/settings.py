@@ -131,6 +131,8 @@ class Settings:
     pexels_api_key: str = ""
     niche: str = "self-growth"  # active stock niche, e.g. money / relationships
     niche_dir: str = "data/niches"  # per-niche profiles: scripts.txt + pexels_query.txt
+    stock_edit: bool = False  # beat-synced edit mode: hard cuts + fullscreen flashes
+    stock_edit_bpm: float = 132.0  # BPM for the edit-mode beat grid (phonk default)
 
     @property
     def channel_token_dir(self) -> Path:
@@ -582,4 +584,6 @@ class Settings:
             pexels_api_key=_env("SHORTS_PEXELS_API_KEY", file_values) or "",
             niche=(_env("SHORTS_NICHE", file_values, "self-growth") or "self-growth").strip().lower(),
             niche_dir=_env("SHORTS_NICHE_DIR", file_values, "data/niches") or "data/niches",
+            stock_edit=_env("SHORTS_STOCK_EDIT", file_values, "0") not in ("0", "", "false", "False"),
+            stock_edit_bpm=float(_env("SHORTS_STOCK_EDIT_BPM", file_values, "132") or "132"),
         )

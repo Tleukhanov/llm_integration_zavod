@@ -151,7 +151,18 @@ def run_stock_short(
                 niche_dir=settings.niche_dir,
             )
             bg_path = clip_work_dir / "background.mp4"
-            if len(clips) >= 2:
+            if len(clips) >= 2 and getattr(settings, "stock_edit", False):
+                stock_visual.render_stock_background_edit(
+                    clips,
+                    clip_work_dir,
+                    bg_path,
+                    render_duration,
+                    bpm=getattr(settings, "stock_edit_bpm", 132.0) or 132.0,
+                    seed=seed,
+                    video_codec=settings.video_codec,
+                    preset=settings.video_preset,
+                )
+            elif len(clips) >= 2:
                 stock_visual.render_stock_background_montage(
                     clips,
                     clip_work_dir,
@@ -186,12 +197,20 @@ def run_stock_short(
 
             # 5. Word timing drives both subtitles and the final duration.
             ass_path = clip_work_dir / "subs.ass"
+            edit_flash = None
+            if getattr(settings, "stock_edit", False):
+                edit_flash = stock_visual.edit_flash_schedule(
+                    render_duration,
+                    bpm=getattr(settings, "stock_edit_bpm", 132.0) or 132.0,
+                    seed=seed,
+                )
             generate_ass_file(
                 segments,
                 start_offset=0.0,
                 output_path=ass_path,
                 pacing=1.0,
                 style_name=settings.subtitle_style,
+                flash_events=edit_flash,
             )
 
             # 6. Affiliate + BGM enrichments (mirror standard pipeline).
@@ -246,6 +265,7 @@ def run_stock_short(
                 preset=settings.video_preset,
                 style_name=settings.subtitle_style,
                 vo_output_path=vo_path,
+                flash_events=edit_flash,
                 **banner_kwargs,
                 **bgm_kwargs,
             )

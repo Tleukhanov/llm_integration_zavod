@@ -246,6 +246,75 @@ class StockVisualTests(unittest.TestCase):
         for niche in ("money", "relationships"):
             self.assertIn(niche, stock_visual.PEXELS_QUERY_BY_NICHE)
 
+    def test_beat_seconds_132(self):
+        self.assertAlmostEqual(stock_visual.beat_seconds(132), 0.4545, places=4)
+
+    def test_edit_cut_grid_beat_aligned_and_increasing(self):
+        beat = stock_visual.beat_seconds(132)
+        cuts = stock_visual._edit_cut_grid(9.0)
+        self.assertTrue(cuts)
+        self.assertTrue(all(0 < c < 9.0 for c in cuts))
+        self.assertEqual(cuts, sorted(cuts))
+        self.assertEqual(len(set(cuts)), len(cuts))
+        for cut in cuts:
+            self.assertAlmostEqual(cut, round(cut / beat) * beat, places=3)
+
+    def test_edit_cut_grid_deterministic_and_guarded(self):
+        self.assertEqual(
+            stock_visual._edit_cut_grid(9.0, seed=3), stock_visual._edit_cut_grid(9.0, seed=3)
+        )
+        self.assertEqual(stock_visual._edit_cut_grid(0.0), [])
+        self.assertEqual(stock_visual._edit_cut_grid(-2.0), [])
+        self.assertEqual(stock_visual._edit_cut_grid(9.0, bpm=0), [])
+        self.assertEqual(stock_visual._edit_cut_grid(9.0, bpm=-120), [])
+
+    def test_edit_cut_grid_keeps_a_full_beat_tail(self):
+        beat = stock_visual.beat_seconds(132)
+        cuts = stock_visual._edit_cut_grid(9.0)
+        self.assertTrue(all(c + beat <= 9.0 - 0.01 + 1e-6 for c in cuts))
+        self.assertEqual(
+            stock_visual._edit_cut_grid(2.0),
+            stock_visual._edit_cut_grid(2.0),
+        )
+
+    def test_edit_cut_grid_spacing_scales_with_min_cut(self):
+        fast = stock_visual._edit_cut_grid(9.0, min_cut=0.5)
+        slow = stock_visual._edit_cut_grid(9.0, min_cut=1.8)
+        self.assertLess(len(slow), len(fast))
+        self.assertTrue(slow)
+
+    def test_edit_flash_schedule_covers_bars(self):
+        flashes = stock_visual.edit_flash_schedule(9.0)
+        self.assertTrue(flashes)
+        bar = 4 * stock_visual.beat_seconds(132)
+        for flash in flashes:
+            self.assertLess(flash["start"], flash["end"])
+            self.assertLessEqual(flash["end"], 9.0)
+            self.assertTrue(flash["text"].strip())
+            self.assertAlmostEqual(flash["start"], round(flash["start"] / bar) * bar, places=3)
+        texts = [f["text"] for f in flashes]
+        self.assertFalse(
+            any(texts[i] == texts[i + 1] for i in range(len(texts) - 1)),
+            "consecutive bars must not repeat a phrase",
+        )
+
+    def test_edit_flash_schedule_deterministic(self):
+        self.assertEqual(
+            stock_visual.edit_flash_schedule(9.0, seed=2),
+            stock_visual.edit_flash_schedule(9.0, seed=2),
+        )
+
+    def test_edit_flash_schedule_guards_and_custom_phrases(self):
+        self.assertEqual(stock_visual.edit_flash_schedule(0.5), [])
+        self.assertEqual(stock_visual.edit_flash_schedule(9.0, bpm=0), [])
+        flashes = stock_visual.edit_flash_schedule(6.0, phrases=["ONE", "TWO"], seed=1)
+        self.assertTrue(flashes)
+        self.assertTrue(all(f["text"] in {"ONE", "TWO"} for f in flashes))
+        self.assertEqual(stock_visual.edit_flash_schedule(6.0, phrases=[], seed=1), [])
+
+    def test_render_stock_background_edit_is_callable(self):
+        self.assertTrue(callable(stock_visual.render_stock_background_edit))
+
 
 if __name__ == "__main__":
     unittest.main()
