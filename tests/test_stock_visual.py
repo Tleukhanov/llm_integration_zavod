@@ -315,6 +315,82 @@ class StockVisualTests(unittest.TestCase):
     def test_render_stock_background_edit_is_callable(self):
         self.assertTrue(callable(stock_visual.render_stock_background_edit))
 
+    def test_edit_cut_grid_shots_are_whole_beats(self):
+        for duration in (4.0, 6.5, 7.0, 9.0, 12.0):
+            for bpm in (90, 120, 132, 140):
+                beat = stock_visual.beat_seconds(bpm)
+                cuts = stock_visual._edit_cut_grid(duration, bpm)
+                prev = 0.0
+                for cut in cuts:
+                    delta = cut - prev
+                    self.assertAlmostEqual(
+                        delta, round(delta / beat) * beat, delta=1e-3, msg=f"{duration=} {bpm=}"
+                    )
+                    prev = cut
+
+    def test_edit_cut_grid_cuts_increase_and_stay_inside_duration(self):
+        for duration in (3.0, 6.5, 7.0, 9.0):
+            for seed in range(5):
+                cuts = stock_visual._edit_cut_grid(duration, 132, seed=seed)
+                self.assertTrue(cuts)
+                self.assertTrue(all(0.0 < cut < duration for cut in cuts))
+                self.assertEqual(cuts, sorted(cuts))
+                self.assertEqual(len(set(cuts)), len(cuts))
+
+    def test_edit_cut_grid_deterministic_and_beat_exact_for_many_seeds(self):
+        for seed in range(25):
+            cuts = stock_visual._edit_cut_grid(6.5, 132, seed=seed)
+            self.assertEqual(cuts, stock_visual._edit_cut_grid(6.5, 132, seed=seed))
+            beat = stock_visual.beat_seconds(132)
+            prev = 0.0
+            for cut in cuts:
+                delta = cut - prev
+                self.assertAlmostEqual(delta, round(delta / beat) * beat, delta=1e-3)
+                prev = cut
+
+    def test_edit_cut_grid_shots_land_on_one_or_two_beats(self):
+        beat = stock_visual.beat_seconds(132)
+        cuts = stock_visual._edit_cut_grid(6.5, 132, min_cut=6.5 / 4)
+        self.assertTrue(cuts)
+        prev = 0.0
+        for cut in cuts:
+            beats = round((cut - prev) / beat)
+            self.assertIn(beats, (1, 2))
+            prev = cut
+
+    def test_edit_cut_grid_is_dense_at_132bpm(self):
+        duration = 7.0
+        cuts = stock_visual._edit_cut_grid(duration, 132)
+        average_shot = duration / (len(cuts) + 1)
+        self.assertLessEqual(average_shot, 1.0)
+        self.assertGreaterEqual(average_shot, stock_visual.beat_seconds(132) - 1e-3)
+
+    def test_source_offset_is_seeded_nonzero_and_clamped(self):
+        seg = 0.909
+        offsets = [stock_visual._source_offset(12.0, 0, k, seg) for k in range(8)]
+        self.assertEqual(offsets, [stock_visual._source_offset(12.0, 0, k, seg) for k in range(8)])
+        self.assertNotEqual(offsets, [stock_visual._source_offset(12.0, 1, k, seg) for k in range(8)])
+        self.assertTrue(all(stock_visual._EDIT_MIN_OFFSET <= o for o in offsets))
+        self.assertTrue(all(o + seg <= 12.0 for o in offsets))
+        self.assertGreater(len(set(offsets)), 4)
+        self.assertEqual(stock_visual._source_offset(1.0, 0, 0, seg), 0.0)
+        self.assertEqual(stock_visual._source_offset(0.0, 0, 3, seg), 0.0)
+
+    def test_ken_burns_alternates_direction_per_shot(self):
+        beat = stock_visual.beat_seconds(132)
+        first = stock_visual._ken_burns(0, 0.909, beat)
+        second = stock_visual._ken_burns(1, 0.909, beat)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first, stock_visual._ken_burns(2, 0.909, beat))
+        self.assertEqual(second, stock_visual._ken_burns(3, 0.909, beat))
+        for expr in (first, second):
+            self.assertTrue(expr.startswith("zoompan=z='1"))
+            self.assertIn(":d=1:", expr)
+            self.assertIn(f"s={stock_visual._TARGET_W}x{stock_visual._TARGET_H}", expr)
+            self.assertIn(f"fps={stock_visual._FPS}", expr)
+        self.assertTrue(first.startswith("zoompan=z='1+0.1400*in/26"))
+        self.assertTrue(second.startswith("zoompan=z='1.1400-0.1400*in/26"))
+
 
 if __name__ == "__main__":
     unittest.main()
