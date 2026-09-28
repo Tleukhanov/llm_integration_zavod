@@ -22,6 +22,7 @@ from pathlib import Path
 
 from shorts_clipper.core.models import TranscriptSegment, TranscriptWord
 from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+from shorts_clipper.utils.video import get_video_metadata
 
 log = logging.getLogger(__name__)
 
@@ -68,8 +69,21 @@ _PEXELS_CACHE_SUBDIR = "_pexels_cache"
 _PEXELS_LIMIT = 5  # max cached videos per query slug
 
 # Edit mode: cut spacing may only be a whole number of beats, and the visual
-# switch should land near a 1-2s shot length instead of the full 3.6s top end.
-_EDIT_SPACING_BEATS: tuple[int, ...] = (1, 2, 4, 8)
+# switch stays on the 1-2 beat ads-style grid instead of drifting to 4-8 beats.
+_EDIT_SPACING_BEATS: tuple[int, ...] = (1, 2)
+# Ken-Burns envelope per shot: zoom depth grows with the shot length and is
+# capped, so a one-beat cut still drifts visibly without smearing.
+_EDIT_ZOOM_PER_BEAT = 0.07
+_EDIT_ZOOM_RANGE = 0.14
+# Horizontal pan sweeps the whole slack window, flipping direction every shot.
+_EDIT_PAN_FROM = 0.06
+_EDIT_PAN_TO = 0.94
+# In-point inside a source clip is drawn from [_EDIT_MIN_OFFSET, _EDIT_MAX_OFFSET].
+_EDIT_MIN_OFFSET = 0.05
+_EDIT_MAX_OFFSET = 4.0
+# Two extra frames of source are read per shot so the frame-exact trims below
+# always have enough material to cut from.
+_EDIT_SOURCE_PAD = 2.0 / _FPS
 # Down-beat flashes wait a beat-and-a-half before the first one lands.
 _EDIT_FLASH_LEAD = 0.3
 _EDIT_FLASH_PHRASES: list[str] = [
@@ -405,6 +419,52 @@ def _edit_cut_grid(
     return cuts
 
 
+def _clip_durations(clips: list[Path]) -> list[float]:
+    """Source durations in seconds, ``0.0`` for clips that cannot be probed."""
+    durations: list[float] = []
+    for clip in clips:
+        try:
+            durations.append(max(0.0, get_video_metadata(str(clip)).duration))
+        except Exception as exc:
+            log.debug("Could not probe %s: %s", clip, exc)
+            durations.append(0.0)
+    return durations
+
+
+def _source_offset(source_duration: float, seed: int, shot: int, seg: float) -> float:
+    """Seeded non-zero in-point for *shot* inside its source clip.
+
+    Repeated clips therefore show a different part of the take every time, and
+    the offset is clamped so ``*seg*`` still fits inside the source.
+    """
+    span = source_duration - seg - 0.1
+    if span <= _EDIT_MIN_OFFSET:
+        return 0.0
+    rng = random.Random(f"{seed}:{shot}")
+    return round(rng.uniform(_EDIT_MIN_OFFSET, min(span, _EDIT_MAX_OFFSET)), 3)
+
+
+def _ken_burns(shot: int, seg: float, beat: float) -> str:
+    """Return the ``zoompan`` filter drifting shot *shot* over *seg* seconds.
+
+    Mirrors the Ken-Burns envelope of :func:`render_stock_background`, but the
+    zoom is normalized to the shot length and the direction alternates with
+    *shot* (even = zoom in and pan right, odd = zoom out and pan left) so
+    back-to-back cuts never drift the same way.  The zoom and the pan ramp
+    linearly from the first to the last frame, so no step is ever visible.
+    """
+    last = max(1, int(round(seg * _FPS)) - 1)
+    zoom = min(_EDIT_ZOOM_RANGE, _EDIT_ZOOM_PER_BEAT * max(1.0, seg / beat))
+    even = shot % 2 == 0
+    z_expr = f"1+{zoom:.4f}*in/{last}" if even else f"{1.0 + zoom:.4f}-{zoom:.4f}*in/{last}"
+    pan_from, pan_to = (_EDIT_PAN_FROM, _EDIT_PAN_TO) if even else (_EDIT_PAN_TO, _EDIT_PAN_FROM)
+    x_expr = f"(iw-iw/zoom)*({pan_from:.3f}{pan_to - pan_from:+.3f}*in/{last})"
+    return (
+        f"zoompan=z='{z_expr}':d=1:x='{x_expr}':y='(ih-ih/zoom)/2':"
+        f"s={_TARGET_W}x{_TARGET_H}:fps={_FPS},setsar=1"
+    )
+
+
 def render_stock_background_edit(
     clips: list[Path],
     work_dir: Path,
@@ -420,9 +480,11 @@ def render_stock_background_edit(
 
     Every boundary sits on a beat from :func:`_edit_cut_grid`; spare timeline is
     spread over even extra cuts, and clips repeat cyclically until the whole
-    *duration* is covered.  Segments are chained with the ``concat`` filter
-    (hard cut, no transition) and a quiet stereo bed is muxed for downstream
-    ``[0:a]`` mixing.
+    *duration* is covered.  Each segment gets its own seeded in-point inside
+    the source plus an alternating Ken-Burns drift, so reused clips and back to
+    back cuts never look like the same frozen frame.  Segments are chained with
+    the ``concat`` filter (hard cut, no transition) and a quiet stereo bed is
+    muxed for downstream ``[0:a]`` mixing.
     """
     out_path = Path(out_path)
     if not clips or duration <= 0:
@@ -451,12 +513,19 @@ def render_stock_background_edit(
     for clip in clips:
         inputs += ["-i", str(clip)]
 
+    durations = _clip_durations(clips)
+    beat = beat_seconds(bpm)
     prep: list[str] = []
     for k, (src, _start, end) in enumerate(segments):
+        seg = end - _start
+        frames = max(2, int(round(seg * _FPS)))
+        offset = _source_offset(durations[src], seed, k, seg)
         prep.append(
-            f"[{src}:v]scale={_TARGET_W}:{_TARGET_H}:force_original_aspect_ratio=increase,"
-            f"crop={_TARGET_W}:{_TARGET_H},setpts=PTS-STARTPTS,trim=duration={end - _start:.3f},"
-            f"setpts=PTS-STARTPTS,fps={_FPS},format=yuv420p[va{k}]"
+            f"[{src}:v]trim=start={offset:.3f}:duration={seg + _EDIT_SOURCE_PAD:.3f},"
+            f"setpts=PTS-STARTPTS,scale={_TARGET_W}:{_TARGET_H}:force_original_aspect_ratio=increase,"
+            f"crop={_TARGET_W}:{_TARGET_H},fps={_FPS},trim=end_frame={frames + 1},"
+            f"{_ken_burns(k, seg, beat)},trim=end_frame={frames},"
+            f"setpts=PTS-STARTPTS,format=yuv420p[va{k}]"
         )
     chain = "".join(f"[va{k}]" for k in range(len(segments)))
     filter_complex = ";".join(
