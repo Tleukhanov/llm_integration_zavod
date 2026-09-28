@@ -55,14 +55,19 @@ EMOTIONAL_TRIGGERS = {
 }
 
 # Fullscreen "edit mode" text flashes (e.g. "NEVER GIVE UP") layered on top of
-# the word subtitles. Kept in its own style so the caption styles stay intact.
+# the word subtitles. Kept in its own style so the caption styles stay intact;
+# it is pinned to the upper third (Alignment 8) so it never lands on the words.
 FLASH_STYLE_NAME = "Flash"
 FLASH_MAX_LINE_CHARS = 18
-_FLASH_EFFECT = r"{\fad(40,180)}"
+FLASH_MAX_WORD_CHARS = 14
+FLASH_MAX_LINES = 3
+FLASH_BASE_FONT_SIZE = 96
+FLASH_MIN_FONT_SIZE = 44
+_FLASH_EFFECT = r"{\fad(30,150)\fscx70\fscy70\t(0,80,\fscx100\fscy100)}"
 _FLASH_STYLE_DEF = (
-    f"{FLASH_STYLE_NAME},Montserrat Black,96,"
+    f"{FLASH_STYLE_NAME},Montserrat Black,{FLASH_BASE_FONT_SIZE},"
     "&H00FFFFFF&,&H00FFFF00&,&H00000000&,&H80000000&,"
-    "-1,0,0,0,88,100,0,0,1,4,1.5,5,40,40,0,1"
+    "-1,0,0,0,88,100,0,0,1,4,1.5,8,40,40,300,1"
 )
 
 # ---------------------------------------------------------------------------
@@ -286,7 +291,12 @@ def _clean_flash_text(text: str) -> str:
 
 
 def _wrap_flash_text(text: str) -> str:
-    """Break a long flash phrase onto two lines at the space nearest the middle."""
+    """Break a long flash phrase onto balanced lines joined by ``\\N``.
+
+    A phrase longer than ``FLASH_MAX_LINE_CHARS`` is split at the space nearest
+    its middle; when a half is still too wide it is packed greedily onto extra
+    lines so a long phrase reads as a block instead of one over-wide line.
+    """
     if len(text) <= FLASH_MAX_LINE_CHARS or " " not in text:
         return text
     mid = len(text) // 2
@@ -300,7 +310,54 @@ def _wrap_flash_text(text: str) -> str:
         split_at = left if abs(left - mid) <= abs(right - mid) else right
     if split_at <= 0:
         return text
-    return f"{text[:split_at]}\\N{text[split_at + 1 :]}"
+    return "\\N".join(_pack_flash_line(text[:split_at]) + _pack_flash_line(text[split_at + 1 :]))
+
+
+def _pack_flash_line(fragment: str) -> list[str]:
+    """Pack a flash fragment into lines no wider than the line budget."""
+    packed: list[str] = []
+    current = ""
+    for word in fragment.split():
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > FLASH_MAX_LINE_CHARS:
+            packed.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        packed.append(current)
+    return packed
+
+
+def _flash_font_size(wrapped: str) -> int:
+    """Return the render size for a wrapped flash phrase.
+
+    Stays at ``FLASH_BASE_FONT_SIZE`` unless the phrase still overflows after
+    wrapping — more than ``FLASH_MAX_LINES`` lines, a line wider than the line
+    budget, or a single word over ``FLASH_MAX_WORD_CHARS`` — in which case the
+    size shrinks with the widest line so the text stays inside the frame.
+    """
+    lines = [line for line in wrapped.split("\\N") if line.strip()]
+    if not lines:
+        return FLASH_BASE_FONT_SIZE
+    widest = max(len(line) for line in lines)
+    longest_word = max(len(word) for line in lines for word in line.split())
+    overflow = max(
+        widest - FLASH_MAX_LINE_CHARS,
+        longest_word - FLASH_MAX_WORD_CHARS,
+        len(lines) - FLASH_MAX_LINES,
+    )
+    if overflow <= 0:
+        return FLASH_BASE_FONT_SIZE
+    scale = FLASH_MAX_LINE_CHARS / widest
+    return max(FLASH_MIN_FONT_SIZE, int(FLASH_BASE_FONT_SIZE * scale))
+
+
+def _flash_effect(font_size: int) -> str:
+    """Build the override block for one flash event, scaled down when needed."""
+    if font_size == FLASH_BASE_FONT_SIZE:
+        return _FLASH_EFFECT
+    return f"{{\\fs{font_size}}}{_FLASH_EFFECT}"
 
 
 def flash_events_to_ass(flash_events: list[dict], start_offset: float = 0.0) -> str:
@@ -309,24 +366,27 @@ def flash_events_to_ass(flash_events: list[dict], start_offset: float = 0.0) -> 
     Each event is ``{"start": float, "end": float, "text": str}`` where both
     timestamps are already relative to the clip start — ``start_offset`` is
     only carried for call-site symmetry and is never added to them. Invalid or
-    fully out-of-clip events (non-positive duration) are dropped.
+    out-of-clip events (negative times, non-positive duration) are dropped.
+    Long phrases are wrapped and shrunk inline so the upper-third flash never
+    clips.
     """
     lines: list[str] = []
     for event in flash_events or []:
         try:
-            start = max(0.0, float(event["start"]))
+            start = float(event["start"])
             end = float(event["end"])
             text = _clean_flash_text(str(event["text"]))
         except (AttributeError, KeyError, TypeError, ValueError):
             log.debug("Skipping malformed flash event: %r", event)
             continue
-        if not text or end <= start:
+        if not text or start < 0.0 or end <= start:
             log.debug("Skipping invalid flash event (%.3f -> %.3f): %s", start, end, text)
             continue
         wrapped = _wrap_flash_text(text)
+        effect = _flash_effect(_flash_font_size(wrapped))
         lines.append(
             f"Dialogue: 0,{_seconds_to_ass_time(start)},{_seconds_to_ass_time(end)},"
-            f"{FLASH_STYLE_NAME},,0,0,0,,{_FLASH_EFFECT}{wrapped}"
+            f"{FLASH_STYLE_NAME},,0,0,0,,{effect}{wrapped}"
         )
     log.debug("Built %d flash Dialogue lines (start_offset=%.3f)", len(lines), start_offset)
     return "\n".join(lines)
