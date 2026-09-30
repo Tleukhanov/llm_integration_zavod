@@ -69,6 +69,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         "'always' adds phonk BGM to every clip.")
     p.add_argument("--channel-profile", default=None, dest="channel_profile",
                    help="Channel profile name (sets SHORTS_CHANNEL for multi-channel env overlay).")
+    p.add_argument("--niche", default=None,
+                   help="Stock visual niche profile (e.g. self-growth, money).")
+    p.add_argument("--visual-mode", dest="visual_mode",
+                   choices=["clip", "stock"], default=None,
+                   help="Visual mode (default: SHORTS_VISUAL_MODE env or clip).")
     return p
 
 
@@ -126,6 +131,7 @@ def _process_batch_items(
                 count=args.count,
                 upload=args.upload,
                 privacy=args.privacy,
+                niche=getattr(args, "niche", None),
             )
             out_list = outputs if isinstance(outputs, list) else [outputs]
             print(f"  SUCCESS: {len(out_list)} clip(s) ready:")
@@ -147,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.channel_profile:
         os.environ["SHORTS_CHANNEL"] = args.channel_profile
 
+    if args.niche:
+        os.environ["SHORTS_NICHE"] = args.niche
+
+    if args.visual_mode:
+        os.environ["SHORTS_VISUAL_MODE"] = args.visual_mode
+
     from dataclasses import replace
 
     from shorts_clipper.core.settings import Settings
@@ -164,6 +176,10 @@ def main(argv: list[str] | None = None) -> int:
         overrides["output_aspect"] = args.aspect
     if args.bgm:
         overrides["bgm_mode"] = args.bgm
+    if args.niche:
+        overrides["niche"] = args.niche
+    if args.visual_mode:
+        overrides["visual_mode"] = args.visual_mode
     if overrides:
         settings = replace(settings, **overrides)
 
@@ -247,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         count=args.count,
         upload=args.upload,
         privacy=args.privacy,
+        niche=args.niche,
     )
 
     out_list = outputs if isinstance(outputs, list) else [outputs]
