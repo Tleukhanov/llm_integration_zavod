@@ -379,8 +379,8 @@ def run_stock_short(
                         last_track = track
                         bgm_kwargs = {
                             "bgm_audio": track,
-                            "bgm_volume": settings.bgm_volume,
-                            "bgm_music_forward": False,
+                            "bgm_volume": settings.stock_bgm_volume,
+                            "bgm_music_forward": True,
                         }
 
             # 7. Burn subtitles + voice + BGM in one pass.

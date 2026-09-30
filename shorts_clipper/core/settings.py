@@ -103,6 +103,7 @@ class Settings:
     bgm_mode: str = "off"
     music_dir: Path = Path("data/music")
     bgm_volume: float = 0.30
+    stock_bgm_volume: float = 0.16
     phonk_min_tracks: int = 2
     phonk_fetch_max_tracks: int = 6
     phonk_fetch_pages: int = 3
@@ -559,6 +560,9 @@ class Settings:
             ),
             bgm_volume=float(
                 _env("SHORTS_BGM_VOLUME", file_values, "0.30") or "0.30"
+            ),
+            stock_bgm_volume=float(
+                _env("SHORTS_STOCK_BGM_VOLUME", file_values, "0.16") or "0.16"
             ),
             phonk_min_tracks=int(
                 _env("SHORTS_PHONK_MIN_TRACKS", file_values, "2") or "2"
