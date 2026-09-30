@@ -4,6 +4,7 @@ Usage:
     python -m shorts_clipper clip <url> [options]
     python -m shorts_clipper autopilot [options]
     python -m shorts_clipper scout
+    python -m shorts_clipper inspect <file.mp4>
 
 Examples:
     python -m shorts_clipper clip https://youtu.be/xyz --output ./clips/
@@ -11,6 +12,7 @@ Examples:
     python -m shorts_clipper scout --count 3
     python -m shorts_clipper clip --source URL1 URL2 --continue-on-error
     python -m shorts_clipper autopilot --batch-file sources.txt
+    python -m shorts_clipper inspect outputs/stock_short_1.mp4
 """
 
 from __future__ import annotations
@@ -232,6 +234,12 @@ def _cmd_repair_metadata(args: argparse.Namespace, settings: Settings) -> int:
     return run_repair()
 
 
+def _cmd_inspect(args: argparse.Namespace, settings: Settings) -> int:
+    from shorts_clipper.inspect import run_inspect
+
+    return run_inspect(args, settings)
+
+
 def _cmd_cleanup(args: argparse.Namespace, settings: Settings) -> int:  # noqa: ARG001
     from shorts_clipper.core.cleanup import run_cleanup
 
@@ -408,6 +416,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Port to listen on (default: 8000)",
     )
 
+    # ── inspect ─────────────────────────────────────────────────────────────
+    inspect_p = sub.add_parser(
+        "inspect",
+        help="Print a read-only quality report for a rendered short.",
+    )
+    inspect_p.add_argument("file", help="Path to the rendered .mp4 file.")
+
     # ── repair-metadata ───────────────────────────────────────────────────────────────
     sub.add_parser("repair-metadata", help="Repair clips missing metadata.")
 
@@ -488,6 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         "autopilot": _cmd_autopilot,
         "scout": _cmd_scout,
         "web": _cmd_web,
+        "inspect": _cmd_inspect,
         "repair-metadata": _cmd_repair_metadata,
         "cleanup": _cmd_cleanup,
         "doctor": _cmd_doctor,
