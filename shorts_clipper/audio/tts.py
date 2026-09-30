@@ -373,3 +373,81 @@ def synthesize_voiceover_boundaries(
             tmp_media.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def resolve_speech_end(intervals, duration, epsilon=0.05):
+    """Return corrected speech end with trailing-silence awareness."""
+    if not intervals:
+        if duration is not None and float(duration) > 0.0:
+            return max(0.0, float(duration) - float(epsilon))
+        return 0.0
+    last_start = float(intervals[-1][0])
+    last_end = float(intervals[-1][1])
+    if duration is None or float(duration) <= 0.0:
+        return last_start
+    if float(last_end) >= float(duration) - 0.2:
+        return last_start
+    return max(float(last_end), float(duration) - float(epsilon))
+
+
+def _tts_wav_duration(audio_path):
+    """Return WAV duration in seconds or None when unreadable."""
+    try:
+        import wave
+
+        with wave.open(str(audio_path), "rb") as handle:
+            frames = handle.getnframes()
+            rate = handle.getframerate()
+            if rate and rate > 0 and frames >= 0:
+                return float(frames) / float(rate)
+            return None
+    except Exception:
+        return None
+
+
+def speech_window(audio_path, threshold_db=-35.0, min_silence=0.4):
+    """Locate actual speech window with trailing-silence aware end."""
+    from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+
+    cmd = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-i",
+        str(audio_path),
+        "-af",
+        f"silencedetect=noise={threshold_db}dB:d={min_silence}",
+        "-f",
+        "null",
+        "-",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        return None
+    silence_starts = []
+    silence_ends = []
+    for line in result.stderr.splitlines():
+        text = line.strip()
+        try:
+            if "silence_start" in text:
+                silence_starts.append(float(text.rsplit(":", 1)[1].strip()))
+            elif "silence_end" in text:
+                silence_ends.append(float(text.rsplit("|", 1)[0].split(":", 1)[1].strip()))
+        except ValueError:
+            continue
+    if not silence_starts and not silence_ends:
+        return None
+    intervals = list(zip(silence_starts, silence_ends, strict=False))
+    if not intervals:
+        return None
+    if intervals[0][0] <= 0.05:
+        speech_start = float(intervals[0][1])
+    else:
+        speech_start = 0.0
+    duration = _tts_wav_duration(audio_path)
+    if duration is None:
+        speech_end = float(intervals[-1][0])
+    else:
+        speech_end = float(resolve_speech_end(intervals, duration))
+    if speech_end <= speech_start + 0.3:
+        return None
+    return float(speech_start), float(speech_end)
