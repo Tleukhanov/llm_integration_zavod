@@ -16,9 +16,13 @@ Configuration:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import random
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,6 +35,48 @@ from shorts_clipper.visual import stock as stock_visual
 log = logging.getLogger(__name__)
 
 
+def _next_free_stable_path(base: Path) -> Path:
+    """Return base path when free else first free suffixed sibling."""
+    if not base.exists() and not base.with_suffix(".json").exists():
+        return base
+    stem = base.stem
+    suffix = base.suffix
+    parent = base.parent
+    n = 2
+    while True:
+        candidate = parent / f"{stem}_{n}{suffix}"
+        if not candidate.exists() and not candidate.with_suffix(".json").exists():
+            return candidate
+        n += 1
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    """Write json payload atomically via temp file and os.replace."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _persist_file_atomic(src: Path, dst: Path) -> None:
+    """Copy src to dst atomically via temp file and os.replace."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    shutil.copy2(src, tmp)
+    os.replace(tmp, dst)
+
+
+def _bgm_seed(seed: int, bg_path: Path) -> random.Random:
+    """Build deterministic RNG for BGM choice from stable digest."""
+    digest = hashlib.sha256(f"{seed}:{bg_path}".encode()).hexdigest()
+    return random.Random(digest)
+
+
+def _ensure_outputs_or_raise(output_paths: list[Path]) -> None:
+    """Raise RuntimeError when zero shorts were produced."""
+    if not output_paths:
+        log.error("Stock run produced zero shorts.")
+        raise RuntimeError("Stock run produced zero shorts: no voiceover or background available.")
+
+
 def run_stock_short(
     *,
     settings: Settings,
@@ -41,8 +87,6 @@ def run_stock_short(
     progress_callback=None,
 ) -> Path | list[Path] | None:
     """Render *count* stock-visual shorts and optionally publish them."""
-    from tempfile import TemporaryDirectory
-
     if settings is None:
         settings = Settings.from_env()
 
@@ -53,7 +97,7 @@ def run_stock_short(
     output_paths: list[Path] = []
     last_track: Path | None = None
 
-    with TemporaryDirectory(prefix="shorts_stock_") as work_dir:
+    with tempfile.TemporaryDirectory(prefix="shorts_stock_") as work_dir:
         work_path = Path(work_dir)
 
         for idx in range(1, count + 1):
@@ -242,7 +286,7 @@ def run_stock_short(
             bgm_kwargs = {}
             track: Path | None = None
             if settings.bgm_mode != "off":
-                run_seed = random.Random(hash(str(bg_path)))
+                run_seed = _bgm_seed(seed, bg_path)
                 if should_use_bgm(settings.bgm_mode, run_seed):
                     track = pick_track(settings.music_dir, run_seed, last_track)
                     if track is not None:
@@ -273,7 +317,7 @@ def run_stock_short(
             # 8. Metadata sidecar (LLM when available, local fallback otherwise).
             meta = _build_stock_meta(settings, current_output_path, script, idx, actual_niche)
             json_path = current_output_path.with_suffix(".json")
-            json_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            _write_json_atomic(json_path, meta)
 
             output_paths.append(current_output_path)
             log.info("✅ Stock short %d ready at: %s", idx, current_output_path)
@@ -286,13 +330,11 @@ def run_stock_short(
             except Exception:
                 pass
             try:
-                import shutil
-
-                stable = settings.output_dir / current_output_path.name
-                shutil.copy2(current_output_path, stable)
+                base = settings.output_dir / current_output_path.name
+                stable = _next_free_stable_path(base)
+                _persist_file_atomic(current_output_path, stable)
                 stable_meta = stable.with_suffix(".json")
-                if not stable_meta.exists():
-                    shutil.copy2(json_path, stable_meta)
+                _write_json_atomic(stable_meta, meta)
                 log.info("✅ Stock short persisted to outputs: %s", stable)
             except Exception as persist_err:
                 log.warning("Could not persist stock short to outputs: %s", persist_err)
@@ -310,9 +352,10 @@ def run_stock_short(
                     retention_grades,
                 )
 
-    if count == 1 and output_paths:
+    _ensure_outputs_or_raise(output_paths)
+    if count == 1:
         return output_paths[0]
-    return output_paths or None
+    return output_paths
 
 
 def _segments_from_word_bounds(
@@ -392,7 +435,7 @@ def _publish_stock(settings, video_path, meta, json_path, segments, niche, video
     from shorts_clipper.publishers import ClipMetadata, PublishingEngine
 
     meta["publish_status"] = "uploading"
-    json_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_json_atomic(json_path, meta)
 
     clip_metadata = ClipMetadata(
         title=meta["title"],
@@ -430,4 +473,4 @@ def _publish_stock(settings, video_path, meta, json_path, segments, niche, video
         meta["publish_error"] = str(upload_err)
         log.error("Stock short publish failed: %s", upload_err)
     finally:
-        json_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        _write_json_atomic(json_path, meta)
