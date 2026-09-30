@@ -70,6 +70,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-variant", type=int, default=-1, dest="title_variant",
                    help="0-based title candidate index for A/B testing "
                         "(sets SHORTS_TITLE_VARIANT; default: -1 = Gemini's pick).")
+    p.add_argument("--visual-mode", dest="visual_mode",
+                   choices=["clip", "stock"],
+                   default=os.environ.get("SHORTS_VISUAL_MODE", "clip"),
+                   help="Visual mode (default: SHORTS_VISUAL_MODE env or clip).")
     return p
 
 
@@ -124,6 +128,71 @@ def _record_produced_clip(
     store.record_clip(rec)
 
 
+def _run_stock_round(
+    settings: object,
+    *,
+    count: int,
+    publish: bool,
+    store: object,
+    channel: str,
+    niche: str | None,
+    daily_cap: int,
+) -> tuple[int, int, int]:
+    """Render stock shorts without VOD discovery."""
+    from shorts_clipper.core.metrics import should_publish_today
+    from shorts_clipper.core.scheduling import in_publish_window
+    from shorts_clipper.pipeline.stock_runner import run_stock_short
+
+    raw = niche if niche else getattr(settings, "niche", "") or "self-growth"
+    effective = str(raw).strip().lower() or "self-growth"
+    niches = [n.strip() for n in effective.split(",") if n.strip()] or ["self-growth"]
+    n_discovered = len(niches)
+    n_clipped = 0
+    n_errors = 0
+    for idx, niche_value in enumerate(niches, 1):
+        can_publish = publish
+        if publish and not in_publish_window(
+            datetime.now().hour,
+            settings.factory_publish_hour_start,
+            settings.factory_publish_hour_end,
+        ):
+            print(f"PUBLISH WINDOW CLOSED (hour={datetime.now().hour}) — "
+                  "skipping publish for this video (recording as unpublished)")
+            can_publish = False
+        if publish and can_publish and not should_publish_today(store, channel, daily_cap):
+            print("DAILY CAP REACHED — skipping publish for this video "
+                  "(recording as unpublished)")
+            can_publish = False
+        stock_id = f"stock:{niche_value}:{idx}"
+        print(f"  [{idx}/{n_discovered}] {stock_id}")
+        try:
+            outputs = run_stock_short(
+                settings=settings,
+                niche=niche_value,
+                count=count,
+                upload=can_publish,
+                privacy="public" if can_publish else "private",
+            )
+            out_list = outputs if isinstance(outputs, list) else [outputs]
+            print(f"        -> {len(out_list)} clip(s) generated")
+            n_clipped += 1
+            video = {"video_id": stock_id, "title": stock_id, "channel": ""}
+            for out in out_list:
+                _record_produced_clip(
+                    settings,
+                    store,
+                    url="",
+                    video=video,
+                    output_path=out,
+                    channel=channel,
+                    published=can_publish,
+                )
+        except Exception as exc:
+            print(f"        FAILED: {exc}")
+            n_errors += 1
+    return n_discovered, n_clipped, n_errors
+
+
 def _run_round(
     settings: object,
     *,
@@ -136,8 +205,19 @@ def _run_round(
     channel: str,
     niche: str | None,
     daily_cap: int,
+    visual_mode: str = "clip",
 ) -> tuple[int, int, int]:
     """Run one discovery + clip round. Returns (discovered, clipped, errors)."""
+    if (visual_mode or "clip") == "stock":
+        return _run_stock_round(
+            settings,
+            count=count,
+            publish=publish,
+            store=store,
+            channel=channel,
+            niche=niche,
+            daily_cap=daily_cap,
+        )
     from shorts_clipper.core.metrics import should_publish_today
     from shorts_clipper.core.scheduling import in_publish_window
     from shorts_clipper.pipeline.runner import run
@@ -265,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                 channel=channel,
                 niche=args.niche,
                 daily_cap=daily_cap,
+                visual_mode=args.visual_mode,
             )
             print(
                 f"Round {round_num}: discovered {n_discovered} videos, "
