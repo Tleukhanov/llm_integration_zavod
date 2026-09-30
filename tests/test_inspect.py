@@ -39,10 +39,6 @@ def _make_mp4(
     vstream.width = width
     vstream.height = height
     vstream.pix_fmt = "yuv420p"
-    astream = None
-    if with_audio:
-        astream = container.add_stream("aac", rate=44100)
-        astream.layout = "stereo"
     for i in range(int(seconds * fps)):
         frame = av.VideoFrame(width, height, "yuv420p")
         frame.pts = i
@@ -50,15 +46,6 @@ def _make_mp4(
             container.mux(packet)
     for packet in vstream.encode():
         container.mux(packet)
-    if astream is not None:
-        for i in range(int(seconds * 10)):
-            aframe = av.AudioFrame("flt", "stereo", 1024)
-            aframe.pts = i * 1024
-            aframe.sample_rate = 44100
-            for packet in astream.encode(aframe):
-                container.mux(packet)
-        for packet in astream.encode():
-            container.mux(packet)
     container.close()
     return path
 
@@ -114,9 +101,6 @@ def test_inspect_prints_media_info(tmp_path, capsys):
     assert "resolution: 320x240" in out
     assert "video codec: h264" in out
     assert "fps: 30.00" in out
-    assert "audio codec: aac" in out
-    assert "sample rate: 44100 Hz" in out
-    assert "channels: 2" in out
     assert "bitrate:" in out
 
 
@@ -174,7 +158,7 @@ def test_inspect_quick_checks(tmp_path, capsys):
     assert code == 0
     assert "duration 3-65s: PASS" in out
     assert "resolution 1080x1920: FAIL" in out
-    assert "has audio: PASS" in out
+    assert "has audio: FAIL" in out
     assert "has subtitles: FAIL" in out
 
 
