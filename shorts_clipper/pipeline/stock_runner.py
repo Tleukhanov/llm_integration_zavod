@@ -151,7 +151,11 @@ def run_stock_short(
             # 3. Build subtitle segments from real spoken word boundaries when
             #    available; otherwise fall back to the uniform grid.
             seg_shift = 0.0
-            speech = stock_visual.speech_window(vo_path)
+            from shorts_clipper.audio.tts import speech_window as tts_speech_window
+
+            speech = tts_speech_window(vo_path)
+            if speech is None:
+                speech = stock_visual.speech_window(vo_path)
             if speech is not None:
                 seg_shift, speech_end = speech
                 effective_dur = max(0.5, speech_end - seg_shift)
@@ -161,7 +165,7 @@ def run_stock_short(
             if word_bounds and len(word_bounds) >= 2:
                 segments = _segments_from_word_bounds(
                     word_bounds,
-                    seg_shift=seg_shift if seg_shift > 0.0 else 0.0,
+                    seg_shift=0.0,
                 )
             else:
                 segments = stock_visual.build_word_segments(script, effective_dur)
