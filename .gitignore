@@ -14,7 +14,9 @@ data/*
 .pytest_cache/
 .ruff_cache/
 .env
+.env.*
 !.env.example
+*.pickle
 *.egg-info/
 .agent/
 .agents/
