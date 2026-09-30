@@ -28,6 +28,18 @@ def _env(name: str, file_values: dict[str, str], default: str | None = None) -> 
     return os.environ.get(name) or file_values.get(name) or default
 
 
+STOCK_MOTIVATION_NICHES = frozenset({"self-growth", "philosophy", "money", "relationships"})
+
+
+def _is_explicit(name: str, file_values: dict[str, str]) -> bool:
+    """Return True when the user set an env var explicitly."""
+    raw = os.environ.get(name)
+    if raw is not None and raw != "":
+        return True
+    raw_file = file_values.get(name)
+    return raw_file is not None and raw_file != ""
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     gemini_api_key: str | None = None
@@ -133,6 +145,7 @@ class Settings:
     niche_dir: str = "data/niches"  # per-niche profiles: scripts.txt + pexels_query.txt
     stock_edit: bool = False  # beat-synced edit mode: hard cuts + fullscreen flashes
     stock_edit_bpm: float = 132.0  # BPM for the edit-mode beat grid (phonk default)
+    stock_affiliate_cards_enabled: bool = False
 
     @property
     def channel_token_dir(self) -> Path:
@@ -150,6 +163,9 @@ class Settings:
             channel_path = path.with_name(f"{path.name}.{channel}")
             channel_values = _parse_env_file(channel_path)
             file_values = {**file_values, **channel_values}
+
+        visual_mode_raw = _env("SHORTS_VISUAL_MODE", file_values, "clip") or "clip"
+        is_stock = visual_mode_raw.strip().lower() == "stock"
 
         enable_gpu = (_env("SHORTS_ENABLE_GPU", file_values, "false") or "false").lower() in {
             "1",
@@ -333,10 +349,13 @@ class Settings:
         hook_judge_enabled = (
             _env("SHORTS_HOOK_JUDGE_ENABLED", file_values, "false") or "false"
         ).lower() in {"1", "true", "yes", "on"}
+        if is_stock and not _is_explicit("SHORTS_HOOK_JUDGE_ENABLED", file_values):
+            hook_judge_enabled = True
 
+        hook_min_default = "0.6" if is_stock else "0.5"
         try:
             hook_min_score = float(
-                _env("SHORTS_HOOK_MIN_SCORE", file_values, "0.5") or "0.5"
+                _env("SHORTS_HOOK_MIN_SCORE", file_values, hook_min_default) or hook_min_default
             )
         except ValueError:
             hook_min_score = 0.5
@@ -461,6 +480,11 @@ class Settings:
         except (ValueError, TypeError):
             stock_edit_bpm = 132.0
         stock_edit_bpm = max(40.0, min(300.0, stock_edit_bpm))
+        stock_affiliate_cards_enabled = (
+            _env("SHORTS_STOCK_AFFILIATE_CARDS_ENABLED", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
+        bgm_default = "mix50" if is_stock else "off"
+        bgm_mode_raw = (_env("SHORTS_BGM_MODE", file_values, bgm_default) or bgm_default).lower()
 
         return cls(
             gemini_api_key=_env("GEMINI_API_KEY", file_values),
@@ -529,7 +553,7 @@ class Settings:
             gameplay_clip_seconds=gameplay_clip_seconds,
             gameplay_music_forward=gameplay_music_forward,
             clip_min_separation=clip_min_separation,
-            bgm_mode=(_env("SHORTS_BGM_MODE", file_values, "off") or "off").lower(),
+            bgm_mode=bgm_mode_raw,
             music_dir=Path(
                 _env("SHORTS_MUSIC_DIR", file_values, "data/music") or "data/music"
             ),
@@ -589,7 +613,7 @@ class Settings:
             game_name=game_name,
             game_label=game_label,
             game_hashtags=game_hashtags,
-            visual_mode=_env("SHORTS_VISUAL_MODE", file_values, "clip") or "clip",
+            visual_mode=visual_mode_raw,
             stock_dir=_env("SHORTS_STOCK_DIR", file_values, "data/stock") or "data/stock",
             stock_script_path=_env("SHORTS_STOCK_SCRIPT_PATH", file_values) or None,
             pexels_api_key=_env("SHORTS_PEXELS_API_KEY", file_values) or "",
@@ -597,4 +621,5 @@ class Settings:
             niche_dir=_env("SHORTS_NICHE_DIR", file_values, "data/niches") or "data/niches",
             stock_edit=stock_edit,
             stock_edit_bpm=stock_edit_bpm,
+            stock_affiliate_cards_enabled=stock_affiliate_cards_enabled,
         )

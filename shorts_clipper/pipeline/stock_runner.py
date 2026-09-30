@@ -28,11 +28,19 @@ from pathlib import Path
 
 from shorts_clipper.captions.generator import burn_subtitles, generate_ass_file
 from shorts_clipper.captions.music import pick_track, should_use_bgm
-from shorts_clipper.core.settings import Settings
+from shorts_clipper.core.settings import STOCK_MOTIVATION_NICHES, Settings
 from shorts_clipper.pipeline.runner import _refresh_retention_grades
 from shorts_clipper.visual import stock as stock_visual
 
 log = logging.getLogger(__name__)
+
+
+def stock_affiliate_allowed(settings: Settings, niche: str | None = None) -> bool:
+    """Return True when affiliate overlays may render for a stock short."""
+    niche_name = (niche or getattr(settings, "niche", "") or "").strip().lower()
+    if niche_name not in STOCK_MOTIVATION_NICHES:
+        return True
+    return bool(getattr(settings, "stock_affiliate_cards_enabled", False))
 
 
 def _next_free_stable_path(base: Path) -> Path:
@@ -263,7 +271,7 @@ def run_stock_short(
 
             # 6. Affiliate + BGM enrichments (mirror standard pipeline).
             affiliate_partner = None
-            if settings.affiliate_enabled:
+            if settings.affiliate_enabled and stock_affiliate_allowed(settings, actual_niche):
                 try:
                     from shorts_clipper.affiliate import (
                         load_affiliate_partners,
@@ -281,7 +289,11 @@ def run_stock_short(
 
             banner_kwargs = {}
             banner_path = getattr(affiliate_partner, "banner_path", None) if affiliate_partner else None
-            if banner_path and Path(banner_path).exists():
+            if (
+                banner_path
+                and Path(banner_path).exists()
+                and stock_affiliate_allowed(settings, actual_niche)
+            ):
                 banner_kwargs = {
                     "banner_image": banner_path,
                     "banner_position": settings.affiliate_banner_position,
