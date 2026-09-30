@@ -268,15 +268,45 @@ def _build_ass_chunks(
                 chunks.append({"text": group_text, "start": current_start, "end": group_end})
                 current_start = group_end
 
-    # Prevent overlapping with the previous chunk due to the 50ms early start
-    for i in range(1, len(chunks)):
-        if chunks[i]["start"] < chunks[i - 1]["end"]:
-            chunks[i]["start"] = chunks[i - 1]["end"]
-
-    # Drop chunks where overlap adjustment pushed start past end
-    chunks = [c for c in chunks if c["start"] < c["end"]]
-
-    return chunks
+    clamped = 0
+    merged = 0
+    kept: list[dict] = []
+    pending_texts: list[str] = []
+    pending_start: float | None = None
+    for chunk in chunks:
+        if kept and chunk["start"] < kept[-1]["end"]:
+            chunk["start"] = kept[-1]["end"]
+            clamped += 1
+        if chunk["start"] < chunk["end"]:
+            if pending_texts:
+                chunk["text"] = " ".join([*pending_texts, chunk["text"]])
+                if pending_start is not None:
+                    chunk["start"] = min(pending_start, chunk["start"])
+                if chunk["start"] >= chunk["end"]:
+                    chunk["end"] = chunk["start"] + 0.02
+                pending_texts = []
+                pending_start = None
+            kept.append(chunk)
+        else:
+            merged += 1
+            if kept:
+                prev_text = kept[-1]["text"]
+                cur_text = chunk["text"]
+                kept[-1]["text"] = f"{prev_text} {cur_text}".strip()
+                if chunk["end"] > kept[-1]["end"]:
+                    kept[-1]["end"] = chunk["end"]
+            else:
+                pending_texts.append(chunk["text"])
+                if pending_start is None:
+                    pending_start = chunk["start"]
+                else:
+                    pending_start = min(pending_start, chunk["start"])
+    if pending_texts and not kept:
+        start = pending_start if pending_start is not None else 0.0
+        kept.append({"text": " ".join(pending_texts), "start": start, "end": start + 0.02})
+    if clamped or merged:
+        log.warning("Clamped %d chunk starts and merged %d degenerate chunks", clamped, merged)
+    return kept
 
 
 # ---------------------------------------------------------------------------
