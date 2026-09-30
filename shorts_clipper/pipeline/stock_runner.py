@@ -30,6 +30,13 @@ from shorts_clipper.captions.generator import burn_subtitles, generate_ass_file
 from shorts_clipper.captions.music import pick_track, should_use_bgm
 from shorts_clipper.core.settings import STOCK_MOTIVATION_NICHES, Settings
 from shorts_clipper.pipeline.runner import _refresh_retention_grades
+from shorts_clipper.pipeline.stock_dedup import (
+    DEFAULT_USED_PATH,
+    choose_unused,
+    load_used,
+    record_used,
+    script_hash,
+)
 from shorts_clipper.visual import stock as stock_visual
 
 log = logging.getLogger(__name__)
@@ -85,6 +92,66 @@ def _ensure_outputs_or_raise(output_paths: list[Path]) -> None:
         raise RuntimeError("Stock run produced zero shorts: no voiceover or background available.")
 
 
+def _stock_candidates(
+    script_path: str | Path | None,
+    niche: str | None,
+    niche_dir: str | Path,
+) -> list[str]:
+    """Return the script pool in load_stock_script priority order."""
+    try:
+        if script_path:
+            path = Path(script_path)
+            if path.is_file():
+                lines = [
+                    ln.strip()
+                    for ln in path.read_text(encoding="utf-8").splitlines()
+                    if ln.strip() and not ln.strip().startswith("#")
+                ]
+                if lines:
+                    return lines
+    except Exception:
+        pass
+    try:
+        profile_lines = list(stock_visual.niche_script_lines(niche, niche_dir))
+    except Exception:
+        profile_lines = []
+    if profile_lines:
+        return profile_lines
+    return list(stock_visual._DEFAULT_SCRIPTS)
+
+
+def _select_stock_script(
+    script_path: str | Path | None,
+    seed: int,
+    *,
+    niche: str | None,
+    niche_dir: str | Path,
+    used_path: str | Path,
+) -> str:
+    """Return an unused script and record it, else fall back to random pick."""
+    fallback = stock_visual.load_stock_script(
+        script_path,
+        seed,
+        niche=niche,
+        niche_dir=niche_dir,
+    )
+    try:
+        candidates = _stock_candidates(script_path, niche, niche_dir)
+        if not candidates:
+            return fallback
+        used = load_used(used_path)
+        chosen, reset = choose_unused(candidates, used)
+        if reset:
+            try:
+                Path(used_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        record_used(used_path, script_hash(chosen))
+        return chosen
+    except Exception:
+        return fallback
+
+
 def run_stock_short(
     *,
     settings: Settings,
@@ -93,6 +160,7 @@ def run_stock_short(
     upload: bool = False,
     privacy: str = "private",
     progress_callback=None,
+    used_path: str | Path | None = None,
 ) -> Path | list[Path] | None:
     """Render *count* stock-visual shorts and optionally publish them."""
     if settings is None:
@@ -123,11 +191,13 @@ def run_stock_short(
             seed = random.Random(f"{video_id}|{idx}").randrange(0, 0xFFFFFFFF)
 
             # 1. Script line for this short.
-            script = stock_visual.load_stock_script(
+            resolved_used = Path(used_path) if used_path is not None else DEFAULT_USED_PATH
+            script = _select_stock_script(
                 settings.stock_script_path,
                 seed,
                 niche=actual_niche,
                 niche_dir=settings.niche_dir,
+                used_path=resolved_used,
             )
 
             # 2. AI voiceover determines the clip duration.  Word timing is
