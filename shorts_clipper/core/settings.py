@@ -451,6 +451,17 @@ class Settings:
         if youtube_api_key:
             os.environ["YOUTUBE_API_KEY"] = youtube_api_key
 
+        stock_edit = (
+            _env("SHORTS_STOCK_EDIT", file_values, "0") or "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        try:
+            stock_edit_bpm = float(
+                _env("SHORTS_STOCK_EDIT_BPM", file_values, "132") or "132"
+            )
+        except (ValueError, TypeError):
+            stock_edit_bpm = 132.0
+        stock_edit_bpm = max(40.0, min(300.0, stock_edit_bpm))
+
         return cls(
             gemini_api_key=_env("GEMINI_API_KEY", file_values),
             openai_api_key=_env("OPENAI_API_KEY", file_values),
@@ -584,6 +595,6 @@ class Settings:
             pexels_api_key=_env("SHORTS_PEXELS_API_KEY", file_values) or "",
             niche=(_env("SHORTS_NICHE", file_values, "self-growth") or "self-growth").strip().lower(),
             niche_dir=_env("SHORTS_NICHE_DIR", file_values, "data/niches") or "data/niches",
-            stock_edit=_env("SHORTS_STOCK_EDIT", file_values, "0") not in ("0", "", "false", "False"),
-            stock_edit_bpm=float(_env("SHORTS_STOCK_EDIT_BPM", file_values, "132") or "132"),
+            stock_edit=stock_edit,
+            stock_edit_bpm=stock_edit_bpm,
         )

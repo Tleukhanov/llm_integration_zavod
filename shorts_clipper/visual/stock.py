@@ -14,6 +14,7 @@ no external licenses, no API keys required.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import re
@@ -154,6 +155,8 @@ def ensure_pexels_cache(
     """
     query = niche_query(niche, niche_dir)
     slug = re.sub(r"[^a-z0-9-]+", "-", query.lower()).strip("-")
+    if not slug:
+        slug = "q-" + hashlib.sha1(query.encode("utf-8")).hexdigest()[:12]
     cache_dir = Path(stock_dir) / _PEXELS_CACHE_SUBDIR / slug
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -419,6 +422,38 @@ def _edit_cut_grid(
     return cuts
 
 
+def _fill_cut_tail(
+    cuts: list[float],
+    needed: int,
+    duration: float,
+    bpm: float,
+    seed: int = 0,
+) -> list[float]:
+    """Extend *cuts* to *needed* entries with beat-quantized times."""
+    filled = list(cuts)
+    if len(filled) >= needed or bpm <= 0 or duration <= 0:
+        return filled
+    beat = beat_seconds(bpm)
+    if beat <= 0:
+        return filled
+    rng = random.Random(seed)
+    base = filled[-1] if filled else 0.0
+    k = int(base / beat) + 1
+    if k < 1:
+        k = 1
+    while len(filled) < needed:
+        candidate = round(k * beat, 3)
+        if candidate <= base + 0.01:
+            k += 1
+            continue
+        if candidate >= duration - 0.01:
+            break
+        filled.append(candidate)
+        base = candidate
+        k += rng.choice(_EDIT_SPACING_BEATS)
+    return filled
+
+
 def _clip_durations(clips: list[Path]) -> list[float]:
     """Source durations in seconds, ``0.0`` for clips that cannot be probed."""
     durations: list[float] = []
@@ -492,13 +527,7 @@ def render_stock_background_edit(
 
     cuts = _edit_cut_grid(duration, bpm, min_cut=duration / len(clips), seed=seed)
     needed = max(1, len(clips) - 1)
-    if len(cuts) < needed:
-        base = cuts[-1] if cuts else 0.0
-        chunk = (duration - base) / (needed - len(cuts) + 1)
-        for step_index in range(1, needed - len(cuts) + 1):
-            candidate = base + step_index * chunk
-            if base + 0.01 < candidate < duration - 0.01:
-                cuts.append(round(candidate, 3))
+    cuts = _fill_cut_tail(cuts, needed, duration, bpm, seed)
 
     bounds = [0.0, *cuts, duration]
     segments = [
