@@ -254,7 +254,11 @@ a friendly message and leaves no report behind.
 | `SHORTS_VIDEO_CODEC` | `libx264` | `libx264` or `h264_nvenc` (auto-set if GPU enabled) |
 | `SHORTS_VIDEO_PRESET` | `ultrafast` | `ultrafast` or `fast` (auto-set to `fast` if GPU enabled) |
 | `SHORTS_SCOUT_MAX_AGE_DAYS` | `90` | Max age of videos Scout considers |
-| `SHORTS_SUBTITLE_STYLE` | `default` | Subtitle styling preset |
+| `SHORTS_SUBTITLE_STYLE` | `default` | Subtitle preset: `default`, `clean`, `minimal`, `gold`, `mrbeast`, `hormozi` |
+| `SHORTS_CAPTION_SCALE_POP` | `false` | Per-caption scale punch-in (off keeps captions still) |
+| `SHORTS_HOOK_BANNER_TEXT` | — | First-second overlay copy; no banner is burned while unset |
+| `SHORTS_HOOK_BANNER_ENABLED` | `true` | Master switch for the hook banner |
+| `SHORTS_STOCK_EDIT_FLASH_BARS` | `2` | Bars between edit-mode text flashes (`1` = every bar) |
 | `SHORTS_PROXY` | — | HTTP proxy for yt-dlp and network requests |
 | `SHORTS_PUBLISH_PLATFORMS` | `youtube,instagram` | Comma-separated list of platforms |
 | `SHORTS_PROVIDER` | `gemini` | AI provider: `gemini`, `openai`, `anthropic`, `ollama` |

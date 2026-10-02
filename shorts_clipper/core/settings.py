@@ -160,6 +160,8 @@ class Settings:
     niche_dir: str = "data/niches"  # per-niche profiles: scripts.txt + pexels_query.txt
     stock_edit: bool = False  # beat-synced edit mode: hard cuts + fullscreen flashes
     stock_edit_bpm: float = 132.0  # BPM for the edit-mode beat grid (phonk default)
+    stock_edit_flash_bars: int = 2  # bars between edit-mode text flashes (1 = every bar)
+    caption_scale_pop: bool = False  # per-caption scale punch-in (off keeps text calm)
     stock_affiliate_cards_enabled: bool = False
 
     @property
@@ -360,6 +362,13 @@ class Settings:
         ).lower() in {"1", "true", "yes", "on"}
 
         hook_banner_text = _env("SHORTS_HOOK_BANNER_TEXT", file_values, "WAIT FOR IT…") or "WAIT FOR IT…"
+        if not _is_explicit("SHORTS_HOOK_BANNER_TEXT", file_values):
+            # The stock banner is an English teaser ("WAIT FOR IT…") and the
+            # pipeline publishes in Russian, so burning it by default puts the
+            # wrong language on screen in the one second that decides the
+            # viewer's next tap. Setting SHORTS_HOOK_BANNER_TEXT keeps the
+            # previous behaviour.
+            hook_banner_text = ""
 
         hook_judge_enabled = (
             _env("SHORTS_HOOK_JUDGE_ENABLED", file_values, "false") or "false"
@@ -495,6 +504,16 @@ class Settings:
         except (ValueError, TypeError):
             stock_edit_bpm = 132.0
         stock_edit_bpm = max(40.0, min(300.0, stock_edit_bpm))
+        try:
+            stock_edit_flash_bars = int(
+                _env("SHORTS_STOCK_EDIT_FLASH_BARS", file_values, "2") or "2"
+            )
+        except (ValueError, TypeError):
+            stock_edit_flash_bars = 2
+        stock_edit_flash_bars = max(1, min(8, stock_edit_flash_bars))
+        caption_scale_pop = (
+            _env("SHORTS_CAPTION_SCALE_POP", file_values, "false") or "false"
+        ).lower() in {"1", "true", "yes", "on"}
         stock_affiliate_cards_enabled = (
             _env("SHORTS_STOCK_AFFILIATE_CARDS_ENABLED", file_values, "false") or "false"
         ).lower() in {"1", "true", "yes", "on"}
@@ -649,5 +668,7 @@ class Settings:
             niche_dir=_env("SHORTS_NICHE_DIR", file_values, "data/niches") or "data/niches",
             stock_edit=stock_edit,
             stock_edit_bpm=stock_edit_bpm,
+            stock_edit_flash_bars=stock_edit_flash_bars,
+            caption_scale_pop=caption_scale_pop,
             stock_affiliate_cards_enabled=stock_affiliate_cards_enabled,
         )

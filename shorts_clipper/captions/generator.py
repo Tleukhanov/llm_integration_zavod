@@ -12,7 +12,6 @@ Why ASS over MoviePy TextClip:
 from __future__ import annotations
 
 import logging
-import random
 import re
 import subprocess
 import tempfile
@@ -25,12 +24,15 @@ log = logging.getLogger(__name__)
 
 # Words that get highlighted in captions (EN + RU). Compared against
 # uppercased word tokens, so Russian entries are written uppercase.
+#
+# Only genuinely loud tokens belong here: highlighting an ordinary word reads
+# as a random colour flash rather than an accent. Plain function words were
+# dropped for exactly that reason ("no" and "way" are among the most frequent
+# English words, so they fired on ordinary sentences, never on a beat).
 EMOTIONAL_TRIGGERS = {
     "NEVER",
     "INSANE",
     "BRO",
-    "NO",
-    "WAY",
     "LISTEN",
     "WAIT",
     "CRAZY",
@@ -42,7 +44,6 @@ EMOTIONAL_TRIGGERS = {
     "SECRET",
     "UNBELIEVABLE",
     "SHOCKING",
-    "AURA",
     "ВАУ",
     "БЛИН",
     "ОФИГЕТЬ",
@@ -52,7 +53,25 @@ EMOTIONAL_TRIGGERS = {
     "СУПЕР",
     "УЖАСНО",
     "КОШМАР",
+    # The Russian script banks are written in a flat, concrete register, so the
+    # intensity lives in these four nouns rather than in interjections.
+    "СТРАХ",
+    "ТРЕВОГА",
+    "УСТАЛОСТЬ",
+    "ОШИБКА",
 }
+
+# Primary fill of every caption preset, plus the default style's fill. A
+# highlighted word has to reset back to the colour of the preset being burned,
+# so these live next to the trigger words that consume them.
+_STYLE_PRIMARY_COLORS = {
+    "mrbeast": "&H0000FFFF&",
+    "hormozi": "&H00FFFFFF&",
+    "clean": "&H00FFFFFF&",
+    "gold": "&H0000D7FF&",
+    "minimal": "&H00FFFFFF&",
+}
+DEFAULT_PRIMARY_COLOR = "&H00F2F2F2&"
 
 # Fullscreen "edit mode" text flashes (e.g. "NEVER GIVE UP") layered on top of
 # the word subtitles. Kept in its own style so the caption styles stay intact;
@@ -85,6 +104,22 @@ def hex_to_ass_color(hex_str: str) -> str:
         a, r, g, b = clean_hex[0:2], clean_hex[2:4], clean_hex[4:6], clean_hex[6:8]
         return f"&H{a}{b}{g}{r}&"
     return "&H00FFFFFF&"
+
+
+def style_primary_color(style_name: str) -> str:
+    """Return the ASS primary fill used by a caption preset.
+
+    A highlighted word resets its colour back to this value, so it has to come
+    from the preset actually being burned rather than being hard-coded to the
+    default style's off-white — otherwise the tail of every caption carrying a
+    trigger word changes colour mid-line under the coloured presets.
+    """
+    name = str(style_name)
+    if name.lower().startswith("custom_"):
+        parts = name.split("_")
+        if len(parts) > 3:
+            return hex_to_ass_color(parts[3])
+    return _STYLE_PRIMARY_COLORS.get(name.lower(), DEFAULT_PRIMARY_COLOR)
 
 
 def _ass_header(style_name: str = "default", include_flash: bool = False) -> str:
@@ -121,49 +156,49 @@ def _ass_header(style_name: str = "default", include_flash: bool = False) -> str
         except Exception:
             style_def = (
                 "Default,Inter Bold,58,"
-                "&H00F2F2F2&,&H00FFFF00&,&H00000000&,&H80000000&,"
+                f"{DEFAULT_PRIMARY_COLOR},&H00FFFF00&,&H00000000&,&H80000000&,"
                 "-1,0,0,0,100,100,0,0,1,2.5,1,2,40,40,180,1"
             )
     elif style_name_lower == "mrbeast":
         # Montserrat Black, size 68, Yellow Primary, heavy Black border (4.0), no shadow
         style_def = (
             "Default,Montserrat Black,68,"
-            "&H0000FFFF&,&H0000FF00&,&H00000000&,&H00000000&,"
+            f"{_STYLE_PRIMARY_COLORS['mrbeast']},&H0000FF00&,&H00000000&,&H00000000&,"
             "-1,0,0,0,100,100,0,0,1,4.0,0,2,40,40,220,1"
         )
     elif style_name_lower == "hormozi":
         # Montserrat ExtraBold, size 65, White Primary, green border outline, large size
         style_def = (
             "Default,Montserrat ExtraBold,65,"
-            "&H00FFFFFF&,&H0000FF00&,&H0000B300&,&H00000000&,"
+            f"{_STYLE_PRIMARY_COLORS['hormozi']},&H0000FF00&,&H0000B300&,&H00000000&,"
             "-1,0,0,0,100,100,0,0,1,4.0,1.5,2,40,40,200,1"
         )
     elif style_name_lower == "clean":
         # Arial Bold, size 60, clean layout, white primary, subtle gray outline, no shadow
         style_def = (
             "Default,Arial Bold,60,"
-            "&H00FFFFFF&,&H0000FF00&,&H004D4D4D&,&H00000000&,"
+            f"{_STYLE_PRIMARY_COLORS['clean']},&H0000FF00&,&H004D4D4D&,&H00000000&,"
             "-1,0,0,0,100,100,0,0,1,1.8,0,2,40,40,180,1"
         )
     elif style_name_lower == "gold":
         # Outfit ExtraBold, size 64, Gold Primary, dark border
         style_def = (
             "Default,Outfit ExtraBold,64,"
-            "&H0000D7FF&,&H0000FF00&,&H00111111&,&H80000000&,"
+            f"{_STYLE_PRIMARY_COLORS['gold']},&H0000FF00&,&H00111111&,&H80000000&,"
             "-1,0,0,0,100,100,0,0,1,3.0,1.0,2,40,40,180,1"
         )
     elif style_name_lower == "minimal":
         # Arial, size 50, solid white text, no outline, translucent black capsule background box (BorderStyle=3)
         style_def = (
             "Default,Arial,50,"
-            "&H00FFFFFF&,&H00000000&,&H00000000&,&H80000000&,"
+            f"{_STYLE_PRIMARY_COLORS['minimal']},&H00000000&,&H00000000&,&H80000000&,"
             "-1,0,0,0,100,100,0,0,3,0,0,2,40,40,180,1"
         )
     else:
         # Default: Inter Bold, size 58, white text, outline 2.5, drop shadow 1
         style_def = (
             "Default,Inter Bold,58,"
-            "&H00F2F2F2&,&H00FFFF00&,&H00000000&,&H80000000&,"
+            f"{DEFAULT_PRIMARY_COLOR},&H00FFFF00&,&H00000000&,&H80000000&,"
             "-1,0,0,0,100,100,0,0,1,2.5,1,2,40,40,180,1"
         )
 
@@ -429,6 +464,7 @@ def generate_ass_file(
     pacing: float = 1.0,
     style_name: str = "default",
     flash_events: list[dict] | None = None,
+    caption_pop: bool = False,
 ) -> Path:
     """Generate an ASS subtitle file from transcript segments.
 
@@ -436,6 +472,11 @@ def generate_ass_file(
     (seconds, already relative to the clip) rendered as fullscreen ``Flash``
     text on top of the word subtitles. ``None`` or empty keeps the previous
     word-only output byte for byte.
+
+    ``caption_pop`` restores the per-caption 110% scale punch-in on short
+    captions. It is off by default: with the four-word chunking the pop lands
+    on most captions of a normal script, so the frame pulses instead of
+    holding still and the text gets harder, not easier, to read.
     """
     out = Path(output_path)
     chunks = _build_ass_chunks(segments, start_offset, pacing=pacing)
@@ -449,6 +490,11 @@ def generate_ass_file(
         "&H0000FFFF&",  # Warm Yellow
         "&H00FF00BF&",  # Electric Purple
     ]
+    # Highlighted words reset back to the preset's own fill, and the accent
+    # colour advances per accent so a render is reproducible byte for byte
+    # instead of depending on the global RNG.
+    base_color = style_primary_color(style_name)
+    highlighted = 0
 
     for chunk in chunks:
         start = _seconds_to_ass_time(chunk["start"])
@@ -462,19 +508,18 @@ def generate_ass_file(
         for w in words:
             clean_word = "".join(c for c in w if c.isalpha())
             if clean_word in EMOTIONAL_TRIGGERS:
-                color = random.choice(highlight_colors)
-                colored_words.append(f"{{\\c{color}}}{w}{{\\c&H00F2F2F2&}}")
+                color = highlight_colors[highlighted % len(highlight_colors)]
+                highlighted += 1
+                colored_words.append(f"{{\\c{color}}}{w}{{\\c{base_color}}}")
             else:
                 colored_words.append(w)
         text = " ".join(colored_words)
 
-        # Calculate character density to prevent overflow on long lines
-        char_count = sum(len(w) for w in words)
-        if char_count > 15:
-            effect = "{\\blur0.5\\fad(50,50)}"
-        else:
-            # Micro scale pop, fade in, and slight blur for premium feel
-            effect = "{\\blur0.5\\fad(50,50)\\fscx110\\fscy110\\t(0,50,\\fscx100\\fscy100)}"
+        # Fade + a hair of blur on every caption; the scale pop is opt-in.
+        effect = "{\\blur0.5\\fad(50,50)"
+        if caption_pop and sum(len(w) for w in words) <= 15:
+            effect += "\\fscx110\\fscy110\\t(0,50,\\fscx100\\fscy100)"
+        effect += "}"
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{effect}{text}")
 
     # Flashes go last so they render above the word subtitles.
@@ -484,6 +529,21 @@ def generate_ass_file(
     out.write_text("\n".join(lines), encoding="utf-8")
     log.debug("ASS file written: %s (%d chunks)", out, len(chunks))
     return out
+
+
+def _escape_drawtext_literal(text: str) -> str:
+    """Escape a string for inlining into a ``drawtext`` filter option.
+
+    The text lands inside ``text='...'`` in a filtergraph, so backslash, the
+    quote and the graph separators have to be escaped, and ``%`` has to be
+    escaped as well because drawtext expands it as a printf directive. Without
+    this a comma or a percent sign in operator-supplied copy (Russian banners
+    are full of commas) silently breaks the filter chain.
+    """
+    escaped = str(text).replace("\\", "\\\\").replace("'", "'\\''")
+    for char in (":", ",", ";", "[", "]", "%"):
+        escaped = escaped.replace(char, "\\" + char)
+    return escaped
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +610,7 @@ def burn_subtitles(
     hook_banner_text: str | None = None,
     vo_output_path: str | Path | None = None,
     flash_events: list[dict] | None = None,
+    caption_pop: bool = False,
 ) -> Path:
     """
     Burn subtitles into a video using FFmpeg's native ASS filter.
@@ -566,7 +627,10 @@ def burn_subtitles(
         preset:         FFmpeg encode preset (fast, medium, slow).
         pacing:         Speed multiplier (1.0 = no change, 1.15 = 15% faster).
         video_codec:    FFmpeg video encoder codec to use.
-        style_name:     Subtitles style preset to burn in (default, mrbeast, minimal).
+        style_name:     Subtitles style preset to burn in (default, mrbeast,
+                        hormozi, clean, gold, minimal, or custom_<font>_<size>_
+                        <primary>_<outline>_<outline_w>_<shadow>).  Anything
+                        unrecognized falls back to default.
         banner_image:   Optional partner banner image overlaid on the video.
         banner_position: Corner for the banner overlay
                         (bottom_left, bottom_right, top_left, top_right).
@@ -591,6 +655,8 @@ def burn_subtitles(
                           audio for an extra original audio layer.
         flash_events:     Optional list of {"start", "end", "text"} dicts
                           rendered as fullscreen "Flash" text over the subtitles.
+        caption_pop:      Re-enable the per-caption scale punch-in. Off by
+                          default so short captions hold still and stay legible.
 
     Returns:
         Path to the output video.
@@ -638,6 +704,7 @@ def burn_subtitles(
             pacing=pacing,
             style_name=style_name,
             flash_events=flash_events,
+            caption_pop=caption_pop,
         )
 
         # FFmpeg ASS filter — libass renders directly during encode
@@ -717,7 +784,7 @@ def burn_subtitles(
         # Hook banner drawtext filter (first ~1 s, upper-third, bold yellow, fades out)
         hook_filter = ""
         if hook_banner_text:
-            _hook_escaped = hook_banner_text.replace("'", "'\\''").replace(":", "\\:")
+            _hook_escaped = _escape_drawtext_literal(hook_banner_text)
             hook_filter = (
                 f"drawtext={font_arg}text='{_hook_escaped}':"
                 "fontsize=H/14:fontcolor=yellow:"

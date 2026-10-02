@@ -381,6 +381,7 @@ def run_stock_short(
                     render_duration,
                     bpm=getattr(settings, "stock_edit_bpm", 132.0) or 132.0,
                     seed=seed,
+                    bars=getattr(settings, "stock_edit_flash_bars", 2) or 2,
                 )
             generate_ass_file(
                 segments,
@@ -389,6 +390,7 @@ def run_stock_short(
                 pacing=1.0,
                 style_name=settings.subtitle_style,
                 flash_events=edit_flash,
+                caption_pop=getattr(settings, "caption_scale_pop", False),
             )
 
             # 6. Affiliate + BGM enrichments (mirror standard pipeline).
@@ -448,6 +450,7 @@ def run_stock_short(
                 style_name=settings.subtitle_style,
                 vo_output_path=vo_path,
                 flash_events=edit_flash,
+                caption_pop=getattr(settings, "caption_scale_pop", False),
                 **banner_kwargs,
                 **bgm_kwargs,
             )

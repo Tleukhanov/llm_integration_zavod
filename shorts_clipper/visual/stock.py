@@ -635,12 +635,15 @@ def edit_flash_schedule(
     bpm: float = 132,
     phrases: list[str] | None = None,
     seed: int = 0,
+    bars: int = 1,
 ) -> list[dict]:
-    """Fullscreen text flashes pinned to down-beats, one per bar.
+    """Fullscreen text flashes pinned to down-beats, one per flash slot.
 
     Each flash spans exactly one bar (4 beats) and is clipped to *duration*;
-    consecutive bars never repeat the same phrase.  Returns ``[]`` when the
-    timeline is shorter than a single bar.
+    consecutive flashes never repeat the same phrase.  ``bars`` sets the slot
+    stride: ``1`` flashes on every bar, ``2`` leaves every other bar clear so
+    the text reads as an accent instead of a permanent overlay.  Returns ``[]``
+    when the timeline is shorter than a single bar.
     """
     if bpm <= 0 or duration <= 0:
         return []
@@ -649,9 +652,11 @@ def edit_flash_schedule(
         return []
 
     bar = 4 * beat_seconds(bpm)
+    stride = max(1, int(bars))
     lead_bar = 1
     while lead_bar * bar < _EDIT_FLASH_LEAD:
         lead_bar += 1
+    lead_bar += ((lead_bar - 1) // stride) * stride
 
     rng = random.Random(seed)
     flashes: list[dict] = []
@@ -664,7 +669,7 @@ def edit_flash_schedule(
         text = rng.choice(options)
         previous = text
         flashes.append({"start": round(start, 3), "end": round(end, 3), "text": text})
-        bar_index += 1
+        bar_index += stride
     return flashes
 
 
