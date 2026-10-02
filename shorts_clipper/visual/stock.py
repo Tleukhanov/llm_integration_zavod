@@ -88,10 +88,10 @@ _EDIT_SOURCE_PAD = 2.0 / _FPS
 # Down-beat flashes wait a beat-and-a-half before the first one lands.
 _EDIT_FLASH_LEAD = 0.3
 _EDIT_FLASH_PHRASES: list[str] = [
-    "NEVER GIVE UP",
-    "PUSH THROUGH",
-    "KEEP GOING",
-    "NO EXCUSES",
+    "НЕ СДАВАЙСЯ",
+    "ПРОБИВАЙСЯ",
+    "НЕ ОСТАНОВЛЯЙСЯ",
+    "БЕЗ ОТГОВОРОК",
 ]
 
 
