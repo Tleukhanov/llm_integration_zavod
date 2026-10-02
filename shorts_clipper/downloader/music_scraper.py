@@ -1,10 +1,16 @@
-"""Download royalty-free phonk / phonk-style BGM tracks for the render pipeline.
+"""Download royalty-free dark industrial techno / synthwave BGM for the render
+pipeline.
+
+Search terms are configurable: every source below is queried once per entry of
+``music_tags()`` (see ``DEFAULT_MUSIC_TAGS`` and the ``SHORTS_MUSIC_TAGS``
+override), so the same code fetches industrial techno, EBM or anything else the
+channel needs without touching source order.
 
 Tried sources, in order:
 
 1. **Jamendo API** – open-source music community; CC BY / CC BY-SA tracks
    suitable for commercial use.  Requires a free Jamendo ``client_id`` API key.
-2. **Pixabay Music** – large phonk catalog under the Pixabay Content License
+2. **Pixabay Music** – large catalog under the Pixabay Content License
    (free commercial use, no attribution). No official music API, but CDN MP3
    URLs are embedded in the search HTML. `urlopen` may be blocked (HTTP 403,
    Cloudflare) on some hosts/IPs.
@@ -25,15 +31,29 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_PIXABAY_SEARCH = "https://pixabay.com/music/search/phonk/"
+# Genres searched when nothing else is configured.  Deliberately dark/industrial
+# rather than "phonk" so the pipeline stops shipping generic phonk slop.
+DEFAULT_MUSIC_TAGS = [
+    "industrial techno",
+    "ebm",
+    "dark techno",
+    "techno",
+    "cyberpunk",
+    "synthwave",
+]
+_MUSIC_TAGS_ENV = "SHORTS_MUSIC_TAGS"
+
+_PIXABAY_SEARCH = "https://pixabay.com/music/search"
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -71,10 +91,45 @@ def _is_audible_bytes(data: bytes, suffix: str) -> bool:
     return any(data.startswith(sig) for sig in magic)
 
 
+def music_tags(tags: Sequence[str] | None = None) -> list[str]:
+    """Resolve the genre/tag list to search the sources for.
+
+    Precedence: explicit *tags* → ``SHORTS_MUSIC_TAGS`` (comma-separated) →
+    ``DEFAULT_MUSIC_TAGS``.  Blank entries are dropped and an empty result falls
+    back to the defaults, so no source is ever queried with an empty term.
+    """
+    if tags is None:
+        raw = os.environ.get(_MUSIC_TAGS_ENV, "")
+        tags = raw.split(",")
+    resolved = [t.strip() for t in tags if t and t.strip()]
+    return resolved or list(DEFAULT_MUSIC_TAGS)
+
+
+def _search_terms(query: str, tags: Sequence[str] | None) -> list[str]:
+    """Single-term override *query*, otherwise every configured tag."""
+    return [query.strip()] if query.strip() else music_tags(tags)
+
+
+def _tags_kwargs(tags: Sequence[str] | None) -> dict[str, list[str]]:
+    """Forward *tags* to a source only when the caller overrode them.
+
+    Omitted otherwise so each source resolves ``SHORTS_MUSIC_TAGS`` /
+    ``DEFAULT_MUSIC_TAGS`` itself, keeping one source of truth for the defaults.
+    """
+    return {} if tags is None else {"tags": list(tags)}
+
+
 # free-stock-music.com base. Tracks carry CC BY licences; we wrap each MP3 with
 # its human-readable artist/title so callers can emit an attribution line.
 _FREESTOK_BASE = "https://www.free-stock-music.com"
-_FREESTOK_SEARCH = _FREESTOK_BASE + "/?s=phonk"
+
+
+def _pixabay_search_url(query: str) -> str:
+    return f"{_PIXABAY_SEARCH}/{urllib.parse.quote_plus(query)}/"
+
+
+def _freestok_search_url(query: str) -> str:
+    return f"{_FREESTOK_BASE}/?s={urllib.parse.quote_plus(query)}"
 
 
 @dataclass
@@ -92,52 +147,60 @@ _PIXABAY_API_URL = "https://pixabay.com/api/music/"
 
 
 def search_pixabay_api(
-    query: str = "phonk",
+    query: str = "",
     api_key: str = "",
     max_tracks: int = 10,
+    tags: Sequence[str] | None = None,
 ) -> list[Track]:
     """Fetch tracks from the Pixabay Music API using *api_key*.
+
+    Searches a single *query* when given, otherwise every entry of *tags* (or
+    the configured defaults) until *max_tracks* unique hits are collected.
 
     Returns up to *max_tracks* ``Track`` objects.  Never raises on network
     errors – returns an empty list instead so callers can fall back.
     """
     if not api_key:
         return []
-    params = urllib.parse.urlencode({
-        "key": api_key,
-        "q": query,
-        "media_type": "music",
-        "per_page": min(max_tracks, 200),
-    })
-    url = f"{_PIXABAY_API_URL}?{params}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
-        log.warning("Pixabay API request failed: %s", exc)
-        return []
-
-    hits = data.get("hits", [])
     tracks: list[Track] = []
-    for hit in hits:
-        audio = hit.get("audio", {})
-        audio_url = audio.get("url", "")
-        if not audio_url:
+    seen: set[str] = set()
+    for term in _search_terms(query, tags):
+        params = urllib.parse.urlencode({
+            "key": api_key,
+            "q": term,
+            "media_type": "music",
+            "per_page": min(max_tracks, 200),
+        })
+        url = f"{_PIXABAY_API_URL}?{params}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            log.warning("Pixabay API request failed (%s): %s", term, exc)
             continue
-        tags = hit.get("tags", "")
-        artist = hit.get("user", "")
-        tracks.append(
-            Track(
-                url=audio_url,
-                name=f"{tags.split(',')[0].strip() if tags else query} - {artist}".strip(" -"),
-                artist=artist or None,
-                license="Pixabay Content License (free commercial use)",
+
+        for hit in data.get("hits", []):
+            audio = hit.get("audio", {})
+            audio_url = audio.get("url", "")
+            if not audio_url or audio_url in seen:
+                continue
+            seen.add(audio_url)
+            hit_tags = hit.get("tags", "")
+            artist = hit.get("user", "")
+            tracks.append(
+                Track(
+                    url=audio_url,
+                    name=f"{hit_tags.split(',')[0].strip() if hit_tags else term} - {artist}".strip(" -"),
+                    artist=artist or None,
+                    license="Pixabay Content License (free commercial use)",
+                )
             )
-        )
+            if len(tracks) >= max_tracks:
+                break
         if len(tracks) >= max_tracks:
             break
-    log.info("Pixabay API phonk: found %d tracks", len(tracks))
+    log.info("Pixabay API: found %d tracks", len(tracks))
     return tracks
 
 
@@ -145,72 +208,81 @@ _JAMENDO_API_URL = "https://api.jamendo.com/v3.0/tracks/"
 
 
 def search_jamendo_tracks(
-    query: str = "phonk",
+    query: str = "",
     api_key: str = "",
     max_tracks: int = 10,
+    tags: Sequence[str] | None = None,
 ) -> list[Track]:
     """Fetch CC BY / CC BY-SA tracks from the Jamendo API using *api_key*.
+
+    Searches a single *query* when given, otherwise every entry of *tags* (or
+    the configured defaults) until *max_tracks* unique tracks are collected.
 
     Only CC BY and CC BY-SA licences are requested (never the NC/ND variants)
     so every returned track is safe for commercial use.  Tracks shorter than
     20 seconds are skipped — they are too short to be a usable BGM bed.
 
     Returns up to *max_tracks* ``Track`` objects.  Never raises on network
-    errors or malformed payloads – returns an empty list instead so callers
-    can fall back to the next source.
+    errors or malformed payloads – returns an empty list instead so callers can
+    fall back to the next source.
     """
     if not api_key:
         return []
-    params = urllib.parse.urlencode({
-        "client_id": api_key,
-        "search": query,
-        "limit": min(max_tracks, 50),
-        "order": "popularity_week",
-        "audioformat": "mp32",
-        "include": "licenses",
-        "license": "by,by-sa",
-    })
-    url = f"{_JAMENDO_API_URL}?{params}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
-        log.warning("Jamendo API request failed: %s", exc)
-        return []
-
     tracks: list[Track] = []
-    for item in data.get("results", []) if isinstance(data, dict) else []:
-        audio_entries = item.get("audio")
-        if not isinstance(audio_entries, list):
-            continue
-        audio_url = ""
-        for entry in audio_entries:
-            if isinstance(entry, dict) and entry.get("audio"):
-                audio_url = entry["audio"]
-                break
-        if not audio_url:
-            continue
+    seen: set[str] = set()
+    for term in _search_terms(query, tags):
+        params = urllib.parse.urlencode({
+            "client_id": api_key,
+            "search": term,
+            "limit": min(max_tracks, 50),
+            "order": "popularity_week",
+            "audioformat": "mp32",
+            "include": "licenses",
+            "license": "by,by-sa",
+        })
+        url = f"{_JAMENDO_API_URL}?{params}"
         try:
-            duration = float(item.get("trackduration", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            duration = 0.0
-        if duration < 20.0:
+            req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            log.warning("Jamendo API request failed (%s): %s", term, exc)
             continue
-        artist = item.get("artist_name") or ""
-        track_license = _jamendo_license_label(item.get("licenses"))
-        tracks.append(
-            Track(
-                url=audio_url,
-                name=f"{item.get('name') or 'Unknown'} - {artist}".strip(" -"),
-                artist=artist or None,
-                license=track_license,
-                duration=duration,
+
+        for item in data.get("results", []) if isinstance(data, dict) else []:
+            audio_entries = item.get("audio")
+            if not isinstance(audio_entries, list):
+                continue
+            audio_url = ""
+            for entry in audio_entries:
+                if isinstance(entry, dict) and entry.get("audio"):
+                    audio_url = entry["audio"]
+                    break
+            if not audio_url or audio_url in seen:
+                continue
+            try:
+                duration = float(item.get("trackduration", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                duration = 0.0
+            if duration < 20.0:
+                continue
+            seen.add(audio_url)
+            artist = item.get("artist_name") or ""
+            track_license = _jamendo_license_label(item.get("licenses"))
+            tracks.append(
+                Track(
+                    url=audio_url,
+                    name=f"{item.get('name') or 'Unknown'} - {artist}".strip(" -"),
+                    artist=artist or None,
+                    license=track_license,
+                    duration=duration,
+                )
             )
-        )
+            if len(tracks) >= max_tracks:
+                break
         if len(tracks) >= max_tracks:
             break
-    log.info("Jamendo API phonk: found %d tracks", len(tracks))
+    log.info("Jamendo API: found %d tracks", len(tracks))
     return tracks
 
 
@@ -243,62 +315,70 @@ def _fetch_html(url: str, timeout: int = 15) -> str:
         return resp.read().decode("utf-8", errors="ignore")
 
 
-def scrape_pixabay_urls(max_pages: int = 1) -> list[str]:
-    """Return de-duplicated Pixabay CDN MP3 URLs for phonk search.
+def scrape_pixabay_urls(
+    max_pages: int = 1, tags: Sequence[str] | None = None
+) -> list[str]:
+    """Return de-duplicated Pixabay CDN MP3 URLs for the configured tags.
 
-    May raise/return-empty when Pixabay blocks the request (403) or parses to
-    nothing. Callers should fall back to another source on failure.
+    Scrapes every search term in *tags* (or the defaults) across *max_pages*
+    pages each.  May raise/return-empty when Pixabay blocks the request (403)
+    or parses to nothing. Callers should fall back to another source on failure.
     """
     urls: list[str] = []
-    for page in range(1, max_pages + 1):
-        url = f"{_PIXABAY_SEARCH}?pagi={page}"
-        try:
-            html = _fetch_html(url)
-        except Exception as exc:
-            log.warning("Pixabay scrape page %d failed: %s", page, exc)
-            continue
-        page_urls = _AUDIO_RE.findall(html)
-        log.info("Pixabay phonk page %d: found %d audio URLs", page, len(page_urls))
-        urls.extend(page_urls)
+    for term in music_tags(tags):
+        for page in range(1, max_pages + 1):
+            url = f"{_pixabay_search_url(term)}?pagi={page}"
+            try:
+                html = _fetch_html(url)
+            except Exception as exc:
+                log.warning("Pixabay scrape page %d failed (%s): %s", page, term, exc)
+                continue
+            page_urls = _AUDIO_RE.findall(html)
+            log.info("Pixabay %s page %d: found %d audio URLs", term, page, len(page_urls))
+            urls.extend(page_urls)
     return list(dict.fromkeys(urls))
 
 
-def scrape_freestock_tracks(max_results: int = 12) -> list[Track]:
-    """Scrape phonk search on free-stock-music.com for downloadable MP3 tracks.
+def scrape_freestock_tracks(
+    max_results: int = 12, tags: Sequence[str] | None = None
+) -> list[Track]:
+    """Scrape the configured tags on free-stock-music.com for downloadable MP3s.
 
-    Exposes tracks as ``Track`` objects so callers can also show an
-    attribution (CC BY requires it). Never raises on network errors.
+    Queries every entry of *tags* (or the defaults) until *max_results* tracks
+    are collected.  Exposes tracks as ``Track`` objects so callers can also show
+    an attribution (CC BY requires it). Never raises on network errors.
     """
-    try:
-        html = _fetch_html(_FREESTOK_SEARCH)
-    except Exception as exc:
-        log.warning("free-stock-music.com scrape failed: %s", exc)
-        return []
-
     tracks: list[Track] = []
     seen: set[str] = set()
-    # Find each MP3 reference plus a recognizable title slug derived from path.
-    for match in _MP3_RE.finditer(html):
-        raw = match.group(1)
-        if not raw.startswith(("http://", "https://")):
-            raw = _FREESTOK_BASE + raw
-        if raw in seen:
+    for term in music_tags(tags):
+        try:
+            html = _fetch_html(_freestok_search_url(term))
+        except Exception as exc:
+            log.warning("free-stock-music.com scrape failed (%s): %s", term, exc)
             continue
-        seen.add(raw)
-        if not raw.startswith(_FREESTOK_BASE):
-            continue
-        slug = raw.rstrip("/").split("/")[-1].removesuffix(".mp3")
-        tracks.append(
-            Track(
-                url=raw,
-                name=slug,
-                artist=None,
-                license="CC BY (attribution required)",
+
+        # Find each MP3 reference plus a recognizable title slug derived from path.
+        for match in _MP3_RE.finditer(html):
+            raw = match.group(1)
+            if not raw.startswith(("http://", "https://")):
+                raw = _FREESTOK_BASE + raw
+            if raw in seen:
+                continue
+            seen.add(raw)
+            if not raw.startswith(_FREESTOK_BASE):
+                continue
+            slug = raw.rstrip("/").split("/")[-1].removesuffix(".mp3")
+            tracks.append(
+                Track(
+                    url=raw,
+                    name=slug,
+                    artist=None,
+                    license="CC BY (attribution required)",
+                )
             )
-        )
-        if len(tracks) >= max_results:
-            break
-    log.info("free-stock-music.com phonk: found %d tracks", len(tracks))
+            if len(tracks) >= max_results:
+                return tracks
+    log.info("free-stock-music.com: found %d tracks", len(tracks))
     return tracks
 
 
@@ -314,29 +394,36 @@ def fetch_phonk_tracks(
     max_pages: int = 2,
     pixabay_api_key: str | None = None,
     jamendo_api_key: str | None = None,
+    tags: Sequence[str] | None = None,
 ) -> list[Path]:
     """Scrape any reachable source and download up to *max_tracks* MP3s.
 
     Source order: Jamendo API (if *jamendo_api_key*), then the Pixabay Music
     API (if *pixabay_api_key*), then HTML-scrape Pixabay, then
-    free-stock-music.com.  Returns as soon as the first source yields at least
-    one track; continues to the next source only when the current one yields
-    nothing.  Skips files already present.  Never raises.
+    free-stock-music.com.  Each source searches every entry of *tags* (default:
+    ``SHORTS_MUSIC_TAGS`` / ``DEFAULT_MUSIC_TAGS``).  Returns as soon as the
+    first source yields at least one track; continues to the next source only
+    when the current one yields nothing.  Skips files already present.  Never
+    raises.
     """
     music_dir = Path(music_dir)
     music_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded: list[Path] = []
+    tag_kwargs = _tags_kwargs(tags)
 
     # --- 1. Jamendo API (CC BY / CC BY-SA, commercial-safe) ---
     if jamendo_api_key:
-        for track in search_jamendo_tracks(api_key=jamendo_api_key, max_tracks=max_tracks):
+        for track in search_jamendo_tracks(
+            api_key=jamendo_api_key, max_tracks=max_tracks, **tag_kwargs
+        ):
             if len(downloaded) >= max_tracks:
                 break
             safe = re.sub(r"[^\w\-. ]", "_", track.name)[:80]
             dest = music_dir / f"jamendo_{safe}.mp3"
             if dest.exists():
-                downloaded.append(dest)
+                if dest not in downloaded:
+                    downloaded.append(dest)
                 continue
             if _download(track.url, dest):
                 artist = f"Jamendo ({track.artist})" if track.artist else "Jamendo"
@@ -348,13 +435,16 @@ def fetch_phonk_tracks(
 
     # --- 2. Pixabay API (authoritative, real MP3 CDN links) ---
     if pixabay_api_key:
-        for track in search_pixabay_api(api_key=pixabay_api_key, max_tracks=max_tracks):
+        for track in search_pixabay_api(
+            api_key=pixabay_api_key, max_tracks=max_tracks, **tag_kwargs
+        ):
             if len(downloaded) >= max_tracks:
                 break
             safe = re.sub(r"[^\w\-. ]", "_", track.name)[:80]
             dest = music_dir / f"pixabay_api_{safe}.mp3"
             if dest.exists():
-                downloaded.append(dest)
+                if dest not in downloaded:
+                    downloaded.append(dest)
                 continue
             if _download(track.url, dest):
                 _write_attribution(music_dir, dest, track)
@@ -364,7 +454,7 @@ def fetch_phonk_tracks(
         log.info("Pixabay API produced no tracks; trying fallbacks")
 
     # --- 3. HTML-scrape Pixabay (may 403) ---
-    pixabay_urls = scrape_pixabay_urls(max_pages=max_pages)
+    pixabay_urls = scrape_pixabay_urls(max_pages=max_pages, **tag_kwargs)
 
     if pixabay_urls:
         for audio_url in pixabay_urls:
@@ -373,7 +463,8 @@ def fetch_phonk_tracks(
             name = _pixabay_track_name(audio_url)
             dest = music_dir / name
             if dest.exists():
-                downloaded.append(dest)
+                if dest not in downloaded:
+                    downloaded.append(dest)
                 continue
             if _download(audio_url, dest):
                 downloaded.append(dest)
@@ -381,12 +472,13 @@ def fetch_phonk_tracks(
             return downloaded
         log.info("Pixabay produced no tracks; falling back to free-stock-music.com")
 
-    for track in scrape_freestock_tracks(max_results=max_tracks):
+    for track in scrape_freestock_tracks(max_results=max_tracks, **tag_kwargs):
         if len(downloaded) >= max_tracks:
             break
         dest = music_dir / f"freestock_{track.name}.mp3"
         if dest.exists():
-            downloaded.append(dest)
+            if dest not in downloaded:
+                downloaded.append(dest)
             continue
         if _download(track.url, dest):
             # Record attribution alongside for later credit line assembly.
@@ -441,6 +533,7 @@ def ensure_phonk_tracks(
     max_pages: int = 2,
     pixabay_api_key: str | None = None,
     jamendo_api_key: str | None = None,
+    tags: Sequence[str] | None = None,
 ) -> None:
     """Top up *music_dir* with license-safe tracks when it is too sparse.
 
@@ -463,5 +556,6 @@ def ensure_phonk_tracks(
         max_pages=max_pages,
         pixabay_api_key=pixabay_api_key,
         jamendo_api_key=jamendo_api_key,
+        tags=tags,
     )
 
