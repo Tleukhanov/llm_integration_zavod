@@ -206,6 +206,19 @@ def run_stock_short(
     # clips rendered just before it in this very run.
     recent = RecentScripts()
 
+    # Never ship a silent stock short: on a fresh clone SHORTS_MUSIC_DIR is
+    # empty and this path never calls the scraper, so synthesize an original
+    # licence-free loop when nothing usable is there.  No-op when tracks exist.
+    if settings.bgm_mode != "off":
+        try:
+            from shorts_clipper.captions.music import ensure_synthesized_track
+
+            ensure_synthesized_track(
+                settings.music_dir, enabled=getattr(settings, "synthesize_music", True)
+            )
+        except Exception as exc:
+            log.warning("Music synthesis fallback skipped: %s", exc)
+
     with tempfile.TemporaryDirectory(prefix="shorts_stock_") as work_dir:
         work_path = Path(work_dir)
 

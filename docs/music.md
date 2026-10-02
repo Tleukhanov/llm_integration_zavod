@@ -12,6 +12,7 @@
 | `SHORTS_BGM_MODE`       | `off`                 | Режим работы: `off`, `music`, `mix50`, `auto` |
 | `SHORTS_MUSIC_DIR`      | `D:\shorts_music`     | Папка с аудиофайлами (.mp3, .m4a, .ogg, .wav) |
 | `SHORTS_BGM_VOLUME`     | `0.30`                | Громкость фоновой музыки (0.0–1.0) |
+| `SHORTS_SYNTHESIZE_MUSIC` | `true`              | Синтезировать луп, если в папке нет ни одного трека |
 
 ### Режимы
 
@@ -65,6 +66,34 @@ python scripts/make_phonk.py   # -> D:/shorts_music/generated_phonk_loop.wav
 скользящий 808-бас с насыщением (tanh), хай-хэты в стиле trap, 4/4.
 Так как это полностью оригинальная синтезированная композиция, лицензия
 не требуется.
+
+### Автоматический фолбэк (чтобы клип не вышел тихим)
+
+Скрапер (`ensure_phonk_tracks`) требует сети или ключей Jamendo/Pixabay, а на
+свежем клоне `SHORTS_MUSIC_DIR` пуст — раньше такой запуск заканчивался роликом
+без музыки. Поэтому после попытки скачивания пайплайн вызывает
+`ensure_synthesized_track` (`shorts_clipper/captions/music.py`): если в папке
+по-прежнему нет ни одного пригодного трека, рендерится оригинальный
+dark-industrial луп (~90 c, 134 BPM, peak 0.92, фиксированный seed) и
+складывается как `dark_industrial_loop.wav`.
+
+- Скачанные треки всегда важнее: синтез срабатывает только на пустой папке и
+  ничего не перезаписывает.
+- Идемпотентно: перед рендером папка проверяется повторно, повторные запуски
+  ничего не перерисовывают.
+- Ошибка синтеза логируется как warning, рендер продолжается без музыки.
+- Имя файла намеренно **не** начинается с `generated_`: такие файлы
+  `pick_track` отфильтровывает (см. `SHORTS_ALLOW_PROCEDURAL_MUSIC`).
+
+Отключить: `SHORTS_SYNTHESIZE_MUSIC=0`.
+
+Весь DSP живёт в `shorts_clipper/audio/dark_industrial.py`; скрипт — тонкая
+CLI-обёртка:
+
+```bash
+python scripts/make_dark_industrial.py                        # -> data/music/dark_industrial_loop.wav
+python scripts/make_dark_industrial.py --duration 20 --out x.wav
+```
 
 ## Выбор трека
 

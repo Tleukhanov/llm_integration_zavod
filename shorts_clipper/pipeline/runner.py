@@ -496,6 +496,21 @@ def run(
                 except Exception as exc:
                     log.warning("Phonk auto-fetch skipped: %s", exc)
 
+                # Last resort: the scraper needs the network/API keys and
+                # SHORTS_MUSIC_DIR is empty on a fresh clone, so a run could end
+                # up with no BGM at all.  Synthesize an original licence-free
+                # loop instead — only when the pool is still empty, and never at
+                # the cost of a real downloaded track.
+                try:
+                    from shorts_clipper.captions.music import ensure_synthesized_track
+
+                    ensure_synthesized_track(
+                        settings.music_dir,
+                        enabled=getattr(settings, "synthesize_music", True),
+                    )
+                except Exception as exc:
+                    log.warning("Music synthesis fallback skipped: %s", exc)
+
             for idx, (window, layout) in enumerate(clips, 1):
                 log.info(
                     "\n--- PROCESSING CLIP %d/%d: %.1fs → %.1fs [%s] ---",

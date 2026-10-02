@@ -122,6 +122,7 @@ class Settings:
     pixabay_api_key: str | None = None
     jamendo_api_key: str | None = None
     music_tags: list[str] = field(default_factory=lambda: list(DEFAULT_MUSIC_TAGS))
+    synthesize_music: bool = True
     hook_banner_enabled: bool = True
     hook_banner_text: str = "WAIT FOR IT…"
     hook_judge_enabled: bool = False
@@ -594,6 +595,10 @@ class Settings:
             pixabay_api_key=_env("SHORTS_PIXABAY_API_KEY", file_values),
             jamendo_api_key=_env("SHORTS_JAMENDO_API_KEY", file_values, "") or "",
             music_tags=music_tags,
+            synthesize_music=(
+                _env("SHORTS_SYNTHESIZE_MUSIC", file_values, "true") or "true"
+            ).lower()
+            in {"1", "true", "yes", "on"},
             hook_banner_enabled=hook_banner_enabled,
             hook_banner_text=hook_banner_text,
             hook_judge_enabled=hook_judge_enabled,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import random
@@ -19,6 +20,17 @@ _MUSIC_EXTS = {".mp3", ".m4a", ".ogg", ".wav"}
 # ``loop`` (e.g. ``generated_phonk_loop.wav``, ``generated_dark_techno_loop``).
 _GENERATED_PREFIX = "generated_"
 _GENERATED_LOOP_MARKER = "loop"
+
+# Operator switch for the last-resort synthesized loop
+# (``ensure_synthesized_track``).  Default ON: the alternative is shipping a
+# silent clip when the music scraper cannot reach the network.  Surfaced as
+# ``Settings.synthesize_music`` (SHORTS_SYNTHESIZE_MUSIC) for the pipeline.
+#
+# The synthesized file therefore keeps a plain name
+# (``dark_industrial.DEFAULT_FILENAME`` = ``dark_industrial_loop.wav``) instead
+# of the ``generated_`` prefix: it is the *only* track in the pool by
+# construction, so filtering it out would defeat the fallback.
+_SYNTHESIZE_MUSIC_ENV = "SHORTS_SYNTHESIZE_MUSIC"
 
 # Minimum duration (seconds) for a track to be considered "long enough" to cover a
 # clip in a single pass without looping.
@@ -165,6 +177,95 @@ def pick_track(
     # fall back to the full candidate pool.
     pool = long if len(long) >= 2 else candidates
     return rng.choice(pool)
+
+
+def usable_tracks(music_dir: Path) -> list[Path]:
+    """Return ``list_tracks`` entries that actually carry bytes on disk.
+
+    ``list_tracks`` is name/extension based, so a truncated download (0 bytes)
+    counts as a track there but is useless as BGM.  Used by
+    ``ensure_synthesized_track`` to decide whether a fallback is still needed.
+    """
+    usable: list[Path] = []
+    for path in list_tracks(music_dir):
+        try:
+            if path.stat().st_size > 0:
+                usable.append(path)
+        except OSError:
+            continue
+    return usable
+
+
+def ensure_synthesized_track(
+    music_dir: Path,
+    *,
+    enabled: bool | None = None,
+    duration: float | None = None,
+) -> Path | None:
+    """Synthesize an original loop into *music_dir* if no usable track exists.
+
+    The last-resort BGM guard.  ``ensure_phonk_tracks`` needs the network (or
+    Jamendo/Pixabay API keys) and ``SHORTS_MUSIC_DIR`` is empty on a fresh
+    clone, which used to mean stock runs shipped silent.  This renders the
+    licence-free ``shorts_clipper.audio.dark_industrial`` loop into *music_dir*
+    so the normal ``pick_track`` has something to play.
+
+    Guarantees:
+
+    * Real tracks always win -- synthesis only happens when ``usable_tracks`` is
+      empty, so nothing is ever overwritten or displaced.
+    * Idempotent -- the pool is checked *before* rendering, so repeat runs cost
+      nothing and the bytes stay identical (fixed seed).
+    * Non-raising -- any failure (numpy missing, disk full, ...) is logged as a
+      warning and ``None`` is returned, so the render continues without BGM.
+
+    *enabled* is passed explicitly by the pipeline (``Settings.synthesize_music``,
+    from ``SHORTS_SYNTHESIZE_MUSIC``); when omitted it is read straight from the
+    environment so every call site honours the gate.  Returns the written path,
+    or ``None`` if synthesis was skipped or failed.
+    """
+    if enabled is None:
+        enabled = os.getenv(_SYNTHESIZE_MUSIC_ENV, "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+    if not enabled:
+        log.info("Music synthesis disabled (SHORTS_SYNTHESIZE_MUSIC); skipping fallback")
+        return None
+
+    music_dir = Path(music_dir)
+    try:
+        existing = usable_tracks(music_dir)
+        if existing:
+            log.debug("Music pool already has %d usable track(s); no synthesis", len(existing))
+            return None
+
+        # Imported lazily: numpy + the synth DSP stay off the import path of every
+        # render that already has music.
+        from shorts_clipper.audio import dark_industrial
+
+        if duration is None:
+            duration = dark_industrial.DEFAULT_DURATION
+        dest = music_dir / dark_industrial.DEFAULT_FILENAME
+        # Render to a sidecar first: a crash mid-write must never leave a
+        # half-written .wav that ``list_tracks`` would happily hand to ffmpeg.
+        tmp = dest.with_name(dest.name + ".tmp")
+        try:
+            dark_industrial.write_wav(
+                tmp, dark_industrial.make_dark_industrial(duration=duration)
+            )
+            tmp.replace(dest)
+        except Exception:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            raise
+        log.info("Synthesized %ss fallback BGM track -> %s", duration, dest)
+        return dest
+    except Exception as exc:
+        log.warning("Could not synthesize fallback music in %s: %s", music_dir, exc)
+        return None
 
 
 def track_attribution(track: Path) -> str | None:
