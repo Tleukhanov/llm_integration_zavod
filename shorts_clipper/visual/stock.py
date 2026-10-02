@@ -10,6 +10,11 @@ The background is any local MP4 you drop into ``data/stock/<niche>/``
 ``SHORTS_STOCK_SCRIPT_PATH`` (one quote per line) or, if unset, from a small
 built-in bank of self-growth wisdom phrases.  Everything is pure FFmpeg,
 no external licenses, no API keys required.
+
+The quote is not drawn blindly: the background's semantic tags (from its
+filename or an optional tag sidecar, see :mod:`shorts_clipper.visual.stock_tags`)
+narrow the script pool to lines that match the clip, so a line about 23:00 no
+longer lands on a sunrise in the forest.
 """
 
 from __future__ import annotations
@@ -19,11 +24,13 @@ import logging
 import random
 import re
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from shorts_clipper.core.models import TranscriptSegment, TranscriptWord
 from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 from shorts_clipper.utils.video import get_video_metadata
+from shorts_clipper.visual import stock_tags
 
 log = logging.getLogger(__name__)
 
@@ -33,25 +40,32 @@ _FPS = 30
 
 # Built-in quotes when no script file is configured. Pure Russian so the
 # auto-picked Edge TTS voice (ru-RU) matches the spoken text every time.
-# Written like hooks, not affirmations: direct address, emotional contrast,
-# a sting in the first few words — the viewer must feel seen in 2 seconds.
+# Each line is a mini narrative arc — concrete setup, the reframe, one short
+# landing line — and the openings deliberately alternate (scene, question,
+# impersonal, first person) so a batch of shorts never sounds like one voice.
 _DEFAULT_SCRIPTS: list[str] = [
-    "Ты не сдался. Ты просто перестал нажимать — продолжить.",
-    "Ты врешь, что тебе всё равно. Если бы было всё равно, ты бы не дочитал.",
-    "Ты не ленивый. Ты тратишь все силы на чужие требования и ничего не оставляешь себе.",
-    "Дело не в мотивации. Дело в том, что тебе надоело быть версией себя, которую ты не выбирал.",
-    "Каждое утро ты выбираешь: проснуться своей жизнью или чужой.",
-    "Они назовут это удачей. Удача не встаёт в пять утра, пока все спят — это ты.",
-    "Ты не боишься провала. Ты боишься, что даже стараться бессмысленно. Это и есть ложь.",
-    "Никто не придёт. Это не грустно. Это твой шанс.",
-    "Твои 23:00 — это твой завтрашний 06:00. Тело уже считает.",
-    "Ты не устал. Ты перестал драться за то, во что веришь в два часа ночи.",
-    "Самая дорогая валюта — не деньги. Это уверенность, которую ты отдал чужому мнению.",
-    "Ты сам себе либо самый жёсткий критик, либо самый надёжный союзник. Выбери, с кем дружить.",
-    "Когда ты перестанешь себя жалеть, начнётся то, что ты заслужил.",
-    "Тебе не нужен новый год. Тебе нужен душ и один несделанный звонок.",
-    "Злость — это твоя сила, которую ты раздал бесплатно. Забери её.",
-    "Потом уже живёт тот, кто решил сегодня.",
+    "Пять утра. Двенадцать подтягиваний, пот на ладонях, отказ на третьем подходе. Завтра будет тринадцать. Через год — сорок. Сейчас двенадцать. Не пропусти этот раз.",
+    "04:11. Глаза открыты, в голове один вопрос: сколько осталось. В 23:00 было выбрано «ещё чуть-чуть». Вот это «чуть-чуть» стоит до утра.",
+    "Телефон убран — и через пятнадцать минут выясняется, что занимал их сам. Не ты без него. Он без тебя.",
+    "Кто-то лежит и считает шаги. Зачем — не понимаю. Понимаю другое: он не лежит.",
+    "Будильник на 7:12. Тело встало, рука берёт телефон, и день начинается не с тебя, а с ленты. Это не подъём. Это смена позы.",
+    "Откладываешь — и точно знаешь, что именно. Знаешь дату, знаешь, сколько это займёт минут. Зная, всё равно откладываешь. Значит, дело не в нехватке времени: оно было в тот момент, когда ты согласился.",
+    "Прогресс — не прыжок. Это скука по линейке. Вчера 60, сегодня 80. Разница ничтожна, поэтому линейку и выбрасывают.",
+    "Человек ушёл из дома в двенадцать. Соседи сказали: зачем учиться, если есть интернет. Он не ответил. Через десять лет он был единственным в комнате, кто умел думать сам.",
+    "В 8:40 открыт ролик про «дисциплину в пять утра». В 8:42 лежит тот, кто его смотрит. Между роликом и режимом — восемь минут.",
+    "Я умел начинать. Проверка простая: сколько раз начинал и бросал? Оказалось — двенадцать. Ни одно из этих «начал» ничего не начинало. Они были разминкой.",
+    "Пока выбираешь, чем заняться, проходит вечер. Пока выбираешь, кем быть, — жизнь. Выбор — это не мысль. Это сорок минут без переключений.",
+    "Восемь часов в состоянии «скоро начну». Шесть из них можно было отдать делу, которое ты всё равно сделал вечером. Шесть часов — не ошибка. Шесть часов — решение.",
+    "Ты боишься провала — это хороший знак, значит, вопрос стоит денег. Но вопрос в другом: сколько уже уплачено за ожидание? Посчитай, и сравнится.",
+    "Три года боялся. Потом разобрался: боялся не провала, а того, что окажется — сразу. Сразу бывает у единиц, остальные платят за вход.",
+    "Понедельник был 48 раз. Сделано 6. Остальные 42 отработаны. Считать надо не понедельники, а вторники — их тоже сорок восемь, но сделано больше.",
+    "«А вдруг не получится» — самая дорогая фраза в русском языке. Ею оплачивается вся жизнь, которая могла случиться.",
+    "Три раза в неделю по тридцать минут. Год — двести шестьдесят часов. Он не стал быстрым. Он стал тем, кто не бросил.",
+    "Лень лежит и не мешает. Неизвестность мешает: с ней надо идти. Значит, это не лень. Страх лечится поступком, а не мыслью.",
+    "Между «не могу» и «не могу ещё раз» — весь разрыв. Там ничего нет, кроме одного повтора.",
+    "Обещания любят воскресенье: в воскресенье вечером их легче дать, чем в понедельник утром. Обещай в понедельник — отменять будет некому.",
+    "В 7:00 решаешь, что день будет хороший. В 21:00 не решаешь ничего. День прошёл, решение не принято. Утренние решения не считаются.",
+    "Сорок дней «примерно» — это сорок дней наугад. Один день с записанным результатом весит больше месяца ощущений. Прогресс, который не записан, не существует.",
 ]
 
 # Background search terms per niche, so Pexels photos complement the topic
@@ -728,12 +742,23 @@ def load_stock_script(
     *,
     niche: str | None = None,
     niche_dir: str | Path = "data/niches",
+    background: str | Path | None = None,
+    background_tags: Iterable[str] | None = None,
 ) -> str:
     """Return one spoken line for the next short.
 
     An existing *script_path* wins, followed by the niche profile and the
-    built-in bank.
+    built-in bank — that precedence is unchanged.  What the pool *is* depends
+    on the visual: pass the chosen *background* clip (or its already-computed
+    *background_tags*) and the line is drawn only from the scripts whose
+    semantic tags overlap the clip's, so a quote about 23:00 stops landing on
+    a sunrise in the forest.  With no visual information the draw is exactly
+    the previous unfiltered one.
     """
+    tags = frozenset(background_tags) if background_tags is not None else (
+        stock_tags.background_tags(background) if background is not None else frozenset()
+    )
+
     if script_path:
         path = Path(script_path)
         if path.is_file():
@@ -743,13 +768,42 @@ def load_stock_script(
                 if ln.strip() and not ln.strip().startswith("#")
             ]
             if lines:
-                return random.Random(seed).choice(lines)
+                return random.Random(seed).choice(_tagged(lines, tags, "script file"))
 
     lines = niche_script_lines(niche, niche_dir)
     if lines:
-        return random.Random(seed).choice(lines)
+        return random.Random(seed).choice(_tagged(lines, tags, f"niche profile {niche or 'default'}"))
 
-    return random.Random(seed).choice(_DEFAULT_SCRIPTS)
+    return random.Random(seed).choice(_tagged(list(_DEFAULT_SCRIPTS), tags, "built-in bank"))
+
+
+def _tagged(
+    lines: list[str],
+    tags: frozenset[str],
+    source: str,
+) -> list[str]:
+    """Narrow *lines* to those matching *tags*, logging a full-pool miss.
+
+    The miss is logged rather than raised: a niche whose quotes are all
+    off-vocabulary, or a clip nobody tagged, must still render.
+    """
+    matched, fell_back = stock_tags.filter_scripts_by_tags(lines, tags)
+    if fell_back:
+        log.info(
+            "Stock script: no script matches visual tags %s — using the full %s pool (%d).",
+            sorted(tags),
+            source,
+            len(matched),
+        )
+    elif tags:
+        log.debug(
+            "Stock script: %d/%d %s scripts match visual tags %s.",
+            len(matched),
+            len(lines),
+            source,
+            sorted(tags),
+        )
+    return matched
 
 
 def build_word_segments(text: str, duration: float, max_words: int = 4) -> list[TranscriptSegment]:

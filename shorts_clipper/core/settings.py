@@ -30,6 +30,18 @@ def _env(name: str, file_values: dict[str, str], default: str | None = None) -> 
 
 STOCK_MOTIVATION_NICHES = frozenset({"self-growth", "philosophy", "money", "relationships"})
 
+# Genres/tags the royalty-free BGM scraper searches (SHORTS_MUSIC_TAGS).
+# Mirrors ``music_scraper.DEFAULT_MUSIC_TAGS`` (kept local: settings.py has no
+# intra-package imports) and biased to dark industrial techno over phonk.
+DEFAULT_MUSIC_TAGS = (
+    "industrial techno",
+    "ebm",
+    "dark techno",
+    "techno",
+    "cyberpunk",
+    "synthwave",
+)
+
 
 def _is_explicit(name: str, file_values: dict[str, str]) -> bool:
     """Return True when the user set an env var explicitly."""
@@ -109,6 +121,7 @@ class Settings:
     phonk_fetch_pages: int = 3
     pixabay_api_key: str | None = None
     jamendo_api_key: str | None = None
+    music_tags: list[str] = field(default_factory=lambda: list(DEFAULT_MUSIC_TAGS))
     hook_banner_enabled: bool = True
     hook_banner_text: str = "WAIT FOR IT…"
     hook_judge_enabled: bool = False
@@ -487,6 +500,11 @@ class Settings:
         bgm_default = "mix50" if is_stock else "off"
         bgm_mode_raw = (_env("SHORTS_BGM_MODE", file_values, bgm_default) or bgm_default).lower()
 
+        music_tags_raw = _env("SHORTS_MUSIC_TAGS", file_values, ",".join(DEFAULT_MUSIC_TAGS)) or ""
+        music_tags = [t.strip() for t in music_tags_raw.split(",") if t.strip()]
+        if not music_tags:
+            music_tags = list(DEFAULT_MUSIC_TAGS)
+
         return cls(
             gemini_api_key=_env("GEMINI_API_KEY", file_values),
             openai_api_key=_env("OPENAI_API_KEY", file_values),
@@ -575,6 +593,7 @@ class Settings:
             ),
             pixabay_api_key=_env("SHORTS_PIXABAY_API_KEY", file_values),
             jamendo_api_key=_env("SHORTS_JAMENDO_API_KEY", file_values, "") or "",
+            music_tags=music_tags,
             hook_banner_enabled=hook_banner_enabled,
             hook_banner_text=hook_banner_text,
             hook_judge_enabled=hook_judge_enabled,

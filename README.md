@@ -100,6 +100,17 @@ shorts-clipper autopilot --niche self-growth --count 5
 - Voice is auto-picked by script language (e.g. Russian → `ru-RU-DmitryNeural`).
 - Rendered clips land in `outputs/` (copy), like every factory result.
 
+**Script ↔ backdrop matching.** The quote is picked *after* the backdrop, from
+the scripts whose meaning fits the clip — a line about 23:00 no longer lands on
+a sunrise in the forest. Tags come from the clip filename and its folder
+(`city_night_rain.mp4` → `city`, `city_night`, `night`, `rain`; a Pexels cache
+folder inherits the semantics of the query it was fetched for). To override,
+put a sidecar next to the clip — either `<clip>.tags.txt` (one tag per line)
+or `<clip>.json` with `{"tags": [...]}`; it wins over the filename. When no
+script matches a clip's tags, the full pool is used and the miss is logged.
+Within one batch a script never repeats, and neither does a near-duplicate of
+the clip before it.
+
 ## Factory runner (multi-channel)
 
 Autonomous batch runner that rotates one factory round per channel:

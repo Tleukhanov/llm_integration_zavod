@@ -12,6 +12,14 @@ log = logging.getLogger(__name__)
 
 _MUSIC_EXTS = {".mp3", ".m4a", ".ogg", ".wav"}
 
+# Procedurally synthesized loops (``scripts/make_phonk.py`` and friends) are a
+# last-resort fallback, not real music: they are never auto-selected unless
+# SHORTS_ALLOW_PROCEDURAL_MUSIC says otherwise.  Matching is by convention so
+# any generator may adopt it — filename starts with ``generated_`` AND contains
+# ``loop`` (e.g. ``generated_phonk_loop.wav``, ``generated_dark_techno_loop``).
+_GENERATED_PREFIX = "generated_"
+_GENERATED_LOOP_MARKER = "loop"
+
 # Minimum duration (seconds) for a track to be considered "long enough" to cover a
 # clip in a single pass without looping.
 LONG_TRACK_SECONDS = 60.0
@@ -64,6 +72,12 @@ def should_use_bgm(mode: str, rng: random.Random) -> bool:
     if mode == "mix50":
         return rng.random() < 0.5
     return False
+
+
+def _is_generated_music(path: Path) -> bool:
+    """Return True for a procedurally generated loop (see ``_GENERATED_PREFIX``)."""
+    name = path.name.lower()
+    return name.startswith(_GENERATED_PREFIX) and _GENERATED_LOOP_MARKER in name
 
 
 def track_duration(path: Path | str) -> float | None:
@@ -128,17 +142,15 @@ def pick_track(
     Prefers tracks that are long enough (``>= LONG_TRACK_SECONDS``) to cover a
     clip in a single pass, so the BGM doesn't run out part-way.  If no track has
     a known duration >= threshold (e.g. only short or unprobeable files), falls
-    back to a fully random pick.  Returns ``None`` when the directory has no
-    playable tracks.
+    back to a fully random pick.  Procedurally generated loops (see
+    ``_GENERATED_PREFIX``) are skipped unless ``SHORTS_ALLOW_PROCEDURAL_MUSIC``
+    is set.  Returns ``None`` when the directory has no playable tracks.
     """
     tracks = list_tracks(music_dir)
     if not tracks:
         return None
     if os.getenv("SHORTS_ALLOW_PROCEDURAL_MUSIC", "0").lower() not in ("1", "true", "on"):
-        tracks = [
-            t for t in tracks
-            if not t.name.startswith("generated_phonk_loop")
-        ]
+        tracks = [t for t in tracks if not _is_generated_music(t)]
     if not tracks:
         return None
     if len(tracks) == 1:
