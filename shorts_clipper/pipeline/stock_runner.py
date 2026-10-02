@@ -32,12 +32,14 @@ from shorts_clipper.core.settings import STOCK_MOTIVATION_NICHES, Settings
 from shorts_clipper.pipeline.runner import _refresh_retention_grades
 from shorts_clipper.pipeline.stock_dedup import (
     DEFAULT_USED_PATH,
-    choose_unused,
+    RecentScripts,
+    choose_fresh,
     load_used,
     record_used,
     script_hash,
 )
 from shorts_clipper.visual import stock as stock_visual
+from shorts_clipper.visual import stock_tags
 
 log = logging.getLogger(__name__)
 
@@ -127,28 +129,56 @@ def _select_stock_script(
     niche: str | None,
     niche_dir: str | Path,
     used_path: str | Path,
+    background_tags: frozenset[str] | None = None,
+    recent: RecentScripts | None = None,
 ) -> str:
-    """Return an unused script and record it, else fall back to random pick."""
+    """Return an unused script that fits the visual, and record it.
+
+    Selection order is explicit and fully explainable:
+
+      1. pool   — ``SHORTS_STOCK_SCRIPT_PATH`` → ``data/niches/<niche>/scripts.txt``
+                  → built-in bank (:func:`_stock_candidates`), unchanged;
+      2. visual — keep only scripts whose tags overlap the background's,
+                  falling back to the whole pool when none match;
+      3. repeat — drop scripts already rendered and near-duplicate themes
+                  from earlier clips in this run;
+      4. draw   — seeded pick from what is left (fully used pool resets, as
+                  :func:`choose_unused` always has).
+    """
+    tags = background_tags or frozenset()
     fallback = stock_visual.load_stock_script(
         script_path,
         seed,
         niche=niche,
         niche_dir=niche_dir,
+        background_tags=tags,
     )
     try:
         candidates = _stock_candidates(script_path, niche, niche_dir)
         if not candidates:
             return fallback
+        candidates, fell_back = stock_tags.filter_scripts_by_tags(candidates, tags)
+        if fell_back:
+            log.info(
+                "Stock script: no script matches visual tags %s — using the full pool (%d).",
+                sorted(tags),
+                len(candidates),
+            )
         used = load_used(used_path)
-        chosen, reset = choose_unused(candidates, used)
+        chosen, reset = choose_fresh(candidates, used, seed=seed, recent=recent)
         if reset:
             try:
                 Path(used_path).unlink(missing_ok=True)
             except Exception:
                 pass
         record_used(used_path, script_hash(chosen))
+        if recent is not None:
+            recent.add(chosen)
+        log.info("Stock script selected (visual tags: %s).", sorted(tags) or ["untagged"])
         return chosen
     except Exception:
+        if recent is not None:
+            recent.add(fallback)
         return fallback
 
 
@@ -172,6 +202,9 @@ def run_stock_short(
 
     output_paths: list[Path] = []
     last_track: Path | None = None
+    # Shared across the whole batch so clip N never repeats the theme of the
+    # clips rendered just before it in this very run.
+    recent = RecentScripts()
 
     with tempfile.TemporaryDirectory(prefix="shorts_stock_") as work_dir:
         work_path = Path(work_dir)
@@ -190,7 +223,19 @@ def run_stock_short(
             clip_work_dir.mkdir(parents=True, exist_ok=True)
             seed = random.Random(f"{video_id}|{idx}").randrange(0, 0xFFFFFFFF)
 
-            # 1. Script line for this short.
+            # 1. Background pool is chosen before the script: the quote is
+            #    matched to what the viewer actually sees, not drawn blind.
+            clips = stock_visual.list_stock_backgrounds(
+                settings.stock_dir,
+                actual_niche,
+                seed,
+                pexels_api_key=settings.pexels_api_key,
+                limit=4,
+                niche_dir=settings.niche_dir,
+            )
+            bg_tags = stock_tags.background_pool_tags(clips)
+
+            # 2. Script line for this short, matched to those visual tags.
             resolved_used = Path(used_path) if used_path is not None else DEFAULT_USED_PATH
             script = _select_stock_script(
                 settings.stock_script_path,
@@ -198,6 +243,8 @@ def run_stock_short(
                 niche=actual_niche,
                 niche_dir=settings.niche_dir,
                 used_path=resolved_used,
+                background_tags=bg_tags,
+                recent=recent,
             )
 
             # 2. AI voiceover determines the clip duration.  Word timing is
@@ -266,16 +313,8 @@ def run_stock_short(
                         )
                     segments = shifted
 
-            # 4. Background: montage of several stock clips, a single clip,
-            #    or a procedural gradient when nothing is available.
-            clips = stock_visual.list_stock_backgrounds(
-                settings.stock_dir,
-                actual_niche,
-                seed,
-                pexels_api_key=settings.pexels_api_key,
-                limit=4,
-                niche_dir=settings.niche_dir,
-            )
+            # 5. Background render: montage of the clips picked in step 1,
+            #    a single clip, or a procedural gradient when nothing exists.
             bg_path = clip_work_dir / "background.mp4"
             if len(clips) >= 2 and getattr(settings, "stock_edit", False):
                 stock_visual.render_stock_background_edit(

@@ -10,6 +10,11 @@ The background is any local MP4 you drop into ``data/stock/<niche>/``
 ``SHORTS_STOCK_SCRIPT_PATH`` (one quote per line) or, if unset, from a small
 built-in bank of self-growth wisdom phrases.  Everything is pure FFmpeg,
 no external licenses, no API keys required.
+
+The quote is not drawn blindly: the background's semantic tags (from its
+filename or an optional tag sidecar, see :mod:`shorts_clipper.visual.stock_tags`)
+narrow the script pool to lines that match the clip, so a line about 23:00 no
+longer lands on a sunrise in the forest.
 """
 
 from __future__ import annotations
@@ -19,11 +24,13 @@ import logging
 import random
 import re
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from shorts_clipper.core.models import TranscriptSegment, TranscriptWord
 from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
 from shorts_clipper.utils.video import get_video_metadata
+from shorts_clipper.visual import stock_tags
 
 log = logging.getLogger(__name__)
 
@@ -735,12 +742,23 @@ def load_stock_script(
     *,
     niche: str | None = None,
     niche_dir: str | Path = "data/niches",
+    background: str | Path | None = None,
+    background_tags: Iterable[str] | None = None,
 ) -> str:
     """Return one spoken line for the next short.
 
     An existing *script_path* wins, followed by the niche profile and the
-    built-in bank.
+    built-in bank — that precedence is unchanged.  What the pool *is* depends
+    on the visual: pass the chosen *background* clip (or its already-computed
+    *background_tags*) and the line is drawn only from the scripts whose
+    semantic tags overlap the clip's, so a quote about 23:00 stops landing on
+    a sunrise in the forest.  With no visual information the draw is exactly
+    the previous unfiltered one.
     """
+    tags = frozenset(background_tags) if background_tags is not None else (
+        stock_tags.background_tags(background) if background is not None else frozenset()
+    )
+
     if script_path:
         path = Path(script_path)
         if path.is_file():
@@ -750,13 +768,42 @@ def load_stock_script(
                 if ln.strip() and not ln.strip().startswith("#")
             ]
             if lines:
-                return random.Random(seed).choice(lines)
+                return random.Random(seed).choice(_tagged(lines, tags, "script file"))
 
     lines = niche_script_lines(niche, niche_dir)
     if lines:
-        return random.Random(seed).choice(lines)
+        return random.Random(seed).choice(_tagged(lines, tags, f"niche profile {niche or 'default'}"))
 
-    return random.Random(seed).choice(_DEFAULT_SCRIPTS)
+    return random.Random(seed).choice(_tagged(list(_DEFAULT_SCRIPTS), tags, "built-in bank"))
+
+
+def _tagged(
+    lines: list[str],
+    tags: frozenset[str],
+    source: str,
+) -> list[str]:
+    """Narrow *lines* to those matching *tags*, logging a full-pool miss.
+
+    The miss is logged rather than raised: a niche whose quotes are all
+    off-vocabulary, or a clip nobody tagged, must still render.
+    """
+    matched, fell_back = stock_tags.filter_scripts_by_tags(lines, tags)
+    if fell_back:
+        log.info(
+            "Stock script: no script matches visual tags %s — using the full %s pool (%d).",
+            sorted(tags),
+            source,
+            len(matched),
+        )
+    elif tags:
+        log.debug(
+            "Stock script: %d/%d %s scripts match visual tags %s.",
+            len(matched),
+            len(lines),
+            source,
+            sorted(tags),
+        )
+    return matched
 
 
 def build_word_segments(text: str, duration: float, max_words: int = 4) -> list[TranscriptSegment]:
