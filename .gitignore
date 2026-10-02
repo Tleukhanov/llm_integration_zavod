@@ -83,6 +83,11 @@ test_output*.json
 downloads/
 logs/
 cache/
+out/
+
+# Live affiliate partner config (public links, per-account tuning).
+# affiliate_partners.example.json is the tracked template.
+affiliate_partners.json
 *.ass
 *.srt
 *.jpg
