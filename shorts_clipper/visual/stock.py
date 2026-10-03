@@ -101,12 +101,38 @@ _EDIT_MAX_OFFSET = 4.0
 _EDIT_SOURCE_PAD = 2.0 / _FPS
 # Down-beat flashes wait a beat-and-a-half before the first one lands.
 _EDIT_FLASH_LEAD = 0.3
+# Last-resort phrases only. The flash is supposed to be said BY the short, so a
+# script's own punchy line wins (see :func:`flash_phrases_from_script`); this
+# bank exists for scripts that yield nothing readable and must never read as
+# generic motivation pasted onto unrelated narration.
 _EDIT_FLASH_PHRASES: list[str] = [
     "НЕ СДАВАЙСЯ",
     "ПРОБИВАЙСЯ",
     "НЕ ОСТАНОВЛЯЙСЯ",
     "БЕЗ ОТГОВОРОК",
 ]
+# Readable window for a fullscreen flash. The style is Montserrat Black and wraps
+# at 18 chars (captions.generator.FLASH_MAX_LINE_CHARS), so anything past ~2
+# wrapped lines stops reading at a glance.
+_EDIT_FLASH_MIN_WORDS = 2
+_EDIT_FLASH_MAX_WORDS = 6
+_EDIT_FLASH_MAX_CHARS = 34
+# 2-3 words is the punchiest flash; longer lines lose a step each word.
+_EDIT_FLASH_PUNCH_WORDS = 3
+_EDIT_FLASH_BREVITY_STEP = 0.2
+# Lateness dominates: the narrative rewrite puts the payoff last, and the payoff
+# is what deserves the screen. Brevity only breaks near-ties.
+_EDIT_FLASH_LATE_WEIGHT = 0.6
+_EDIT_FLASH_SHORT_WEIGHT = 0.4
+# Distinct script lines the flash rotates through.
+_EDIT_FLASH_POOL_MAX = 4
+# How many already-burned slots stay blocked from re-opening the next cycle, so
+# the tightest possible repeat is 3 slots apart (~11s at the bars=2 stride).
+_EDIT_FLASH_REPEAT_GUARD = 2
+# Punctuation that ends a spoken sentence; a trailing ellipsis counts too.
+_EDIT_FLASH_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+|[\r\n]+")
+# Characters trimmed off both ends of a candidate line.
+_EDIT_FLASH_EDGE_CHARS = " \t«»\"'“”„‘’—–-,;:."
 
 
 def niche_query(niche: str | None, niche_dir: str | Path = "data/niches") -> str:
@@ -630,24 +656,102 @@ def render_stock_background_edit(
     return out_path
 
 
+def _flash_candidate_text(line: str) -> str:
+    """Return *line* trimmed to bare flash text (no quotes, dashes, padding)."""
+    return re.sub(r"\s+", " ", line).strip(_EDIT_FLASH_EDGE_CHARS)
+
+
+def _flash_sentences(script: str) -> list[str]:
+    """Split *script* into spoken sentences, order preserved."""
+    return [s for s in _EDIT_FLASH_SENTENCE_SPLIT.split(script or "") if s and s.strip()]
+
+
+def flash_phrases_from_script(
+    script: str | None,
+    limit: int = _EDIT_FLASH_POOL_MAX,
+) -> list[str]:
+    """Rank the flash-sized lines of *script*, strongest first (deterministic).
+
+    A flash is one big line of caps, so a candidate has to read in a glance:
+    2-6 words and at most ~2 wrapped lines. Within that window candidates are
+    scored on two axes — how late the sentence lands and how terse it is — and
+    ties break on position, then on the text itself, so the ranking is a pure
+    function of the script.
+
+    Lateness wins because the script arc (setup → reframe → payoff) is written
+    so the payoff comes last; terseness breaks near-ties so the punchiest of two
+    equally late lines burns. Returns ``[]`` when the script has nothing
+    readable, leaving the caller to fall back.
+    """
+    sentences = _flash_sentences(script)
+    total = len(sentences)
+    if not total:
+        return []
+    scored: list[tuple[float, int, str]] = []
+    seen: set[str] = set()
+    for index, sentence in enumerate(sentences):
+        text = _flash_candidate_text(sentence)
+        words = text.split()
+        if not _EDIT_FLASH_MIN_WORDS <= len(words) <= _EDIT_FLASH_MAX_WORDS:
+            continue
+        if len(text) > _EDIT_FLASH_MAX_CHARS:
+            continue
+        if not any(ch.isalpha() for ch in text):
+            continue
+        phrase = text.upper()
+        if phrase in seen:
+            continue
+        seen.add(phrase)
+        lateness = index / (total - 1) if total > 1 else 1.0
+        brevity = 1.0 - _EDIT_FLASH_BREVITY_STEP * max(0, len(words) - _EDIT_FLASH_PUNCH_WORDS)
+        score = _EDIT_FLASH_LATE_WEIGHT * lateness + _EDIT_FLASH_SHORT_WEIGHT * brevity
+        scored.append((score, index, phrase))
+    # Highest score first; earlier sentence and smaller text break ties so the
+    # order never depends on dict/set iteration.
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return [phrase for _, _, phrase in scored[: max(1, int(limit))]]
+
+
 def edit_flash_schedule(
     duration: float,
     bpm: float = 132,
     phrases: list[str] | None = None,
     seed: int = 0,
     bars: int = 1,
+    script: str | None = None,
 ) -> list[dict]:
     """Fullscreen text flashes pinned to down-beats, one per flash slot.
 
-    Each flash spans exactly one bar (4 beats) and is clipped to *duration*;
-    consecutive flashes never repeat the same phrase.  ``bars`` sets the slot
-    stride: ``1`` flashes on every bar, ``2`` leaves every other bar clear so
-    the text reads as an accent instead of a permanent overlay.  Returns ``[]``
-    when the timeline is shorter than a single bar.
+    Each flash spans exactly one bar (4 beats) and is clipped to *duration*.
+    ``bars`` sets the slot stride: ``1`` flashes on every bar, ``2`` leaves every
+    other bar clear so the text reads as an accent instead of a permanent
+    overlay.
+
+    Phrase order of precedence: an explicit ``phrases`` pool, else the script's
+    own punchy lines (:func:`flash_phrases_from_script`) so the screen says what
+    the voice says.  The static bank applies only when no ``script`` was passed
+    at all; a script that yields nothing readable gets no flash rather than a
+    Russian battle-cry pasted over (say) an English voiceover.  The last
+    ``_EDIT_FLASH_REPEAT_GUARD`` slots are held back from every draw, so the same
+    text never lands inside a 3-slot window (no "НЕ ОСТАНОВЛЯЙСЯ" at 7s and
+    again at 14s) and the tightest possible repeat is 2 slots for a 2-line pool.
+    Returns ``[]`` when the timeline is shorter than a single bar.
     """
     if bpm <= 0 or duration <= 0:
         return []
-    pool = [p for p in (_EDIT_FLASH_PHRASES if phrases is None else phrases) if p]
+    if phrases is not None:
+        pool = [p for p in phrases if p]
+    elif script is None:
+        pool = list(_EDIT_FLASH_PHRASES)
+    else:
+        pool = flash_phrases_from_script(script)
+        if not pool:
+            # A script was supplied but yielded nothing flash-sized. Do NOT fall
+            # back to the static bank here: it is Russian, so an English (or any
+            # non-Cyrillic) short would get "НЕ ОСТАНОВЛЯЙСЯ" burned over
+            # foreign narration -- the exact defect this replaced. No flash is
+            # the honest answer.
+            return []
     if not pool:
         return []
 
@@ -660,14 +764,15 @@ def edit_flash_schedule(
 
     rng = random.Random(seed)
     flashes: list[dict] = []
-    previous = ""
+    recent: list[str] = []
     bar_index = lead_bar
     while bar_index * bar < duration:
         start = bar_index * bar
         end = min(duration, start + bar)
-        options = [p for p in pool if p != previous] or pool
-        text = rng.choice(options)
-        previous = text
+        blocked = set(recent[-_EDIT_FLASH_REPEAT_GUARD:])
+        open_pool = [p for p in pool if p not in blocked] or list(pool)
+        text = rng.choice(open_pool)
+        recent.append(text)
         flashes.append({"start": round(start, 3), "end": round(end, 3), "text": text})
         bar_index += stride
     return flashes

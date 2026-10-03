@@ -657,6 +657,109 @@ class RunStockShortMatchingTests(unittest.TestCase):
             self.assertEqual(len(pool_seen), 1)
             self.assertEqual(seen, ["Пять утра. Двенадцать подтягиваний."])
 
+    def test_edit_flash_text_is_taken_from_the_rendered_script(self):
+        """The on-screen flash must be said BY the short, not a stock slogan."""
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            stock_dir = tmp / "stock"
+            (stock_dir / "_pexels_cache" / "morning-sunrise-forest-calm").mkdir(parents=True)
+            (stock_dir / "_pexels_cache" / "morning-sunrise-forest-calm" / "00.mp4").write_bytes(
+                b"clip"
+            )
+            niche_dir = tmp / "niches"
+            (niche_dir / "self-growth").mkdir(parents=True)
+            script = "Телефон убран — и через пятнадцать минут выясняется, что занимал их сам. Не ты без него. Он без тебя."
+            (niche_dir / "self-growth" / "scripts.txt").write_text(
+                script + "\n", encoding="utf-8"
+            )
+
+            flash_kwargs: list[dict] = []
+            burned_flash_text: list[str] = []
+
+            def fake_pool(*args, **kwargs):
+                return [stock_dir / "_pexels_cache" / "morning-sunrise-forest-calm" / "00.mp4"]
+
+            def fake_tts(script_text: str, vo_path: Path, **kwargs):
+                Path(vo_path).write_bytes(b"voice")
+                return Path(vo_path), [("alpha", 0.0, 0.5)]
+
+            def fake_render(*args, **kwargs):
+                out = Path(args[2])
+                out.write_bytes(b"bg")
+                return out
+
+            def fake_burn(*args, **kwargs):
+                out = Path(kwargs["output_path"])
+                out.write_bytes(b"video")
+                return out
+
+            real_edit_flash_schedule = stock_visual.edit_flash_schedule
+
+            def real_schedule(duration, **kwargs):
+                flash_kwargs.append(kwargs)
+                return real_edit_flash_schedule(duration, **kwargs)
+
+            def fake_ass(*args, **kwargs):
+                burned_flash_text.extend(f["text"] for f in kwargs.get("flash_events") or [])
+                return tmp / "s.ass"
+
+            from types import SimpleNamespace
+            from unittest import mock
+
+            settings = SimpleNamespace(
+                niche="self-growth",
+                stock_script_path=None,
+                niche_dir=str(niche_dir),
+                stock_dir=str(stock_dir),
+                pexels_api_key="",
+                stock_edit=True,
+                stock_edit_bpm=132.0,
+                stock_edit_flash_bars=2,
+                video_codec="libx264",
+                video_preset="veryfast",
+                subtitle_style="Default",
+                affiliate_enabled=False,
+                bgm_mode="off",
+                music_dir=str(tmp),
+                bgm_volume=0.2,
+                vo_rate="+0%",
+                vo_pitch="+3Hz",
+                output_dir=tmp / "outputs",
+                publish_platforms=[],
+            )
+            with mock.patch(
+                "shorts_clipper.pipeline.stock_runner._refresh_retention_grades", return_value={}
+            ), mock.patch(
+                "shorts_clipper.audio.tts.synthesize_voiceover_boundaries", side_effect=fake_tts
+            ), mock.patch(
+                "shorts_clipper.captions.music.track_duration", return_value=8.0
+            ), mock.patch(
+                "shorts_clipper.audio.tts.speech_window", return_value=None
+            ), mock.patch(
+                "shorts_clipper.visual.stock.speech_window", return_value=None
+            ), mock.patch(
+                "shorts_clipper.visual.stock.list_stock_backgrounds", side_effect=fake_pool
+            ), mock.patch(
+                "shorts_clipper.visual.stock.render_stock_background", side_effect=fake_render
+            ), mock.patch(
+                "shorts_clipper.visual.stock.edit_flash_schedule", side_effect=real_schedule
+            ), mock.patch(
+                "shorts_clipper.pipeline.stock_runner.generate_ass_file", side_effect=fake_ass
+            ), mock.patch(
+                "shorts_clipper.pipeline.stock_runner.burn_subtitles", side_effect=fake_burn
+            ):
+                stock_runner.run_stock_short(
+                    settings=settings, count=1, used_path=tmp / "used.json"
+                )
+
+            self.assertEqual(len(flash_kwargs), 1)
+            self.assertEqual(flash_kwargs[0]["script"], script)
+            self.assertTrue(burned_flash_text)
+            for text in burned_flash_text:
+                self.assertIn(text, {"ОН БЕЗ ТЕБЯ", "НЕ ТЫ БЕЗ НЕГО"})
+            for canned in stock_visual._EDIT_FLASH_PHRASES:
+                self.assertNotIn(canned, burned_flash_text)
+
 
 if __name__ == "__main__":
     unittest.main()

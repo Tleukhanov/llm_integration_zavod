@@ -382,6 +382,7 @@ def run_stock_short(
                     bpm=getattr(settings, "stock_edit_bpm", 132.0) or 132.0,
                     seed=seed,
                     bars=getattr(settings, "stock_edit_flash_bars", 2) or 2,
+                    script=script,
                 )
             generate_ass_file(
                 segments,
