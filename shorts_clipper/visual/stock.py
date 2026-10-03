@@ -112,11 +112,19 @@ _EDIT_FLASH_PHRASES: list[str] = [
     "БЕЗ ОТГОВОРОК",
 ]
 # Readable window for a fullscreen flash. The style is Montserrat Black and wraps
-# at 18 chars (captions.generator.FLASH_MAX_LINE_CHARS), so anything past ~2
-# wrapped lines stops reading at a glance.
+# at 18 chars (captions.generator.FLASH_MAX_LINE_CHARS) and is built to lay out
+# up to 3 lines (FLASH_MAX_LINES), so the char budget is 18 x 3 = 54; 44 keeps
+# the typical flash at 2-3 lines with margin for a long word.
+#
+# This was 34, which admitted only 2 lines and silently cost 20% of the shipped
+# scripts their on-screen punch: "Хорошего специалиста замечают поздно" is 37
+# chars and was rejected by 3 characters, as were 53 other scripts. Measured over
+# all 271 lines in data/niches: 34 chars -> 80.1% coverage, 44 -> 87.5%.
+# Loosening the admission window does not inflate what is burned, because ranking
+# prefers late and brief: median chosen length stays 21 chars, p90 31.
 _EDIT_FLASH_MIN_WORDS = 2
 _EDIT_FLASH_MAX_WORDS = 6
-_EDIT_FLASH_MAX_CHARS = 34
+_EDIT_FLASH_MAX_CHARS = 44
 # 2-3 words is the punchiest flash; longer lines lose a step each word.
 _EDIT_FLASH_PUNCH_WORDS = 3
 _EDIT_FLASH_BREVITY_STEP = 0.2
