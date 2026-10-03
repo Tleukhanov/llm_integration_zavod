@@ -21,6 +21,15 @@ _MUSIC_EXTS = {".mp3", ".m4a", ".ogg", ".wav"}
 _GENERATED_PREFIX = "generated_"
 _GENERATED_LOOP_MARKER = "loop"
 
+# Scratch/debug artifacts that must never reach a rendered clip. Unlike
+# ``_GENERATED_PREFIX`` -- which is a legitimate procedural loop and is opt-in --
+# these are byproducts of testing: a real run burned ``test_phonk_132.wav`` over
+# a published short because a leftover sat in the pool beside the intended track
+# and ``pick_track`` chose between them at random. Junk is filtered
+# unconditionally, with no env override, because there is no operator scenario
+# where a debug render is the BGM they want.
+_JUNK_STEMS = ("test_", "test-", "tmp_", "tmp-", "debug_", "debug-", "scratch_")
+
 # Operator switch for the last-resort synthesized loop
 # (``ensure_synthesized_track``).  Default ON: the alternative is shipping a
 # silent clip when the music scraper cannot reach the network.  Surfaced as
@@ -58,6 +67,16 @@ def list_tracks(music_dir: Path) -> list[Path]:
         )
     except OSError:
         return []
+
+
+def _is_junk_music(path: Path) -> bool:
+    """Return ``True`` for scratch/debug audio that must not be played.
+
+    Matched on the filename stem prefix, case-insensitively, so ``Test_Render``
+    and ``test_phonk_132.wav`` are both caught.
+    """
+    stem = path.stem.lower()
+    return stem.startswith(_JUNK_STEMS)
 
 
 def should_use_bgm(mode: str, rng: random.Random) -> bool:
@@ -161,6 +180,9 @@ def pick_track(
     tracks = list_tracks(music_dir)
     if not tracks:
         return None
+    tracks = [t for t in tracks if not _is_junk_music(t)]
+    if not tracks:
+        return None
     if os.getenv("SHORTS_ALLOW_PROCEDURAL_MUSIC", "0").lower() not in ("1", "true", "on"):
         tracks = [t for t in tracks if not _is_generated_music(t)]
     if not tracks:
@@ -180,14 +202,18 @@ def pick_track(
 
 
 def usable_tracks(music_dir: Path) -> list[Path]:
-    """Return ``list_tracks`` entries that actually carry bytes on disk.
+    """Return tracks that could actually be mixed: non-empty and not junk.
 
     ``list_tracks`` is name/extension based, so a truncated download (0 bytes)
-    counts as a track there but is useless as BGM.  Used by
+    counts as a track there but is useless as BGM.  Scratch files are excluded
+    too, so a directory holding nothing but ``test_*.wav`` is correctly treated
+    as empty and the synthesis fallback fires.  Used by
     ``ensure_synthesized_track`` to decide whether a fallback is still needed.
     """
     usable: list[Path] = []
     for path in list_tracks(music_dir):
+        if _is_junk_music(path):
+            continue
         try:
             if path.stat().st_size > 0:
                 usable.append(path)

@@ -10,9 +10,11 @@ from pathlib import Path
 
 from shorts_clipper.captions.music import (
     LONG_TRACK_SECONDS,
+    _is_junk_music,
     list_tracks,
     pick_track,
     track_duration,
+    usable_tracks,
 )
 
 
@@ -94,6 +96,52 @@ class PickTrackPrefersLongTests(unittest.TestCase):
                 (d / f"track_{i}.mp3").write_bytes(b"x")  # not real audio
             picked = {pick_track(d, random.Random(s)) for s in range(20)}
             self.assertEqual(len(picked), 3)
+
+
+class JunkMusicFilterTests(unittest.TestCase):
+    """Scratch audio must never be burned into a clip.
+
+    A real run mixed `test_phonk_132.wav` over a published short: the leftover
+    sat in the pool beside the intended industrial loop and `pick_track` chose
+    between them at random. Unlike the `generated_*` family there is no operator
+    scenario where a debug render is the BGM they want, so the filter is
+    unconditional.
+    """
+
+    def test_junk_prefixes_are_never_picked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            good = d / "dark_industrial_loop.wav"
+            _write_small_wav(good, nframes=int(44100 * 90))
+            for name in (
+                "test_phonk_132.wav",
+                "Test_Render.wav",
+                "tmp_loop.wav",
+                "debug_bgm.wav",
+                "scratch_x.wav",
+            ):
+                _write_small_wav(d / name, nframes=int(44100 * 90))
+            for seed in range(40):
+                self.assertEqual(pick_track(d, random.Random(seed)), good)
+
+    def test_junk_only_directory_is_empty_and_falls_back_to_synthesis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_small_wav(d / "test_phonk_132.wav", nframes=int(44100 * 90))
+            # Visible to list_tracks (it only filters by extension)...
+            self.assertEqual([p.name for p in list_tracks(d)], ["test_phonk_132.wav"])
+            # ...but not mixable, and not "usable" -- so ensure_synthesized_track
+            # renders a real loop instead of shipping the debug render.
+            self.assertIsNone(pick_track(d, random.Random(0)))
+            self.assertEqual(usable_tracks(d), [])
+
+    def test_non_junk_names_survive_the_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for name in ("dark_industrial_loop.wav", "latest_2024.wav", "attest.wav"):
+                _write_small_wav(d / name, nframes=int(44100 * 90))
+            for path in list_tracks(d):
+                self.assertFalse(_is_junk_music(path), msg=path.name)
 
 
 class MakePhonkGeneratorTests(unittest.TestCase):
