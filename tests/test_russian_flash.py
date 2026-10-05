@@ -50,10 +50,14 @@ class RussianFlashTests(unittest.TestCase):
             self.assertNotIn(flash["text"], stock_visual._EDIT_FLASH_PHRASES)
 
     def test_flash_slot_count_unchanged(self):
-        """Cadence guard: grid slots plus the one cold-open flash."""
-        # 9.0s  @ bars=1 -> bars 1,2,3,4 = 4 grid + opener
-        self.assertEqual(len(stock_visual.edit_flash_schedule(9.0, script=MONEY_SCRIPT)), 5)
-        # 30.0s @ bars=2 -> bars 2,4,...,16 = 8 grid + opener
+        """Cadence guard: grid slots plus the one cold-open flash.
+
+        The grid now resumes at the first whole bar after the opener ends, so
+        bars=1 starts at bar 2 rather than bar 1 -- otherwise the two overlapped.
+        """
+        # 9.0s  @ bars=1 -> bars 2,3,4 = 3 grid + opener
+        self.assertEqual(len(stock_visual.edit_flash_schedule(9.0, script=MONEY_SCRIPT)), 4)
+        # 30.0s @ bars=2 -> bars 2,4,...,16... = 8 grid + opener
         self.assertEqual(len(stock_visual.edit_flash_schedule(30.0, bars=2, script=MONEY_SCRIPT)), 9)
 
     def test_flash_schedule_timing_unchanged(self):
@@ -70,6 +74,33 @@ class RussianFlashTests(unittest.TestCase):
             self.assertAlmostEqual(
                 flash["start"], round(flash["start"] / bar) * bar, places=3
             )
+
+    def test_flashes_never_overlap_at_any_stride(self):
+        """Regression: the cold open used to overlap the first grid flash.
+
+        At bars=1 the opener ran to 2.27s while bar 1 began at 1.82s, and two
+        overlapping Dialogue lines in the Flash style render the same text twice
+        on top of itself. Overlapping Dialogue is not caught by the bar-alignment
+        assertions, so it needs its own guard across strides and durations.
+        """
+        for bars in (1, 2, 3, 4, 8):
+            for duration in (2.0, 5.0, 9.0, 13.7, 30.0):
+                with self.subTest(bars=bars, duration=duration):
+                    flashes = stock_visual.edit_flash_schedule(
+                        duration, 132, bars=bars, script=MONEY_SCRIPT, seed=1
+                    )
+                    for prev, cur in zip(flashes, flashes[1:], strict=False):
+                        self.assertLessEqual(prev["end"], cur["start"] + 1e-9)
+
+    def test_cold_open_does_not_stall_the_cadence(self):
+        """The opener must not push the grid out to a dead spot."""
+        flashes = stock_visual.edit_flash_schedule(13.7, 132, bars=2, script=MONEY_SCRIPT, seed=1)
+        self.assertTrue(flashes)
+        gaps = [
+            flashes[i + 1]["start"] - flashes[i]["start"] for i in range(len(flashes) - 1)
+        ]
+        # Starts are rounded to 3 decimals, so allow for accumulated rounding.
+        self.assertLessEqual(max(gaps), 2 * 4 * stock_visual.beat_seconds(132) + 5e-3)
 
     def test_flash_schedule_deterministic(self):
         self.assertEqual(

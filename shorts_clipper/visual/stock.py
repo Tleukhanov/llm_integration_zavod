@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import random
 import re
 import subprocess
@@ -797,11 +798,14 @@ def edit_flash_schedule(
     opener = min(_EDIT_FLASH_OPEN_OFFSET, duration)
     if duration > bar:
         _draw(opener)
-
-    bar_index = stride
-    while bar_index * bar < duration:
-        _draw(bar_index * bar)
-        bar_index += stride
+        # Resume on the first whole bar starting at or after the opener ends.
+        # Starting at `stride` unconditionally overlapped the two at bars=1: the
+        # opener ran to 2.27s while bar 1 began at 1.82s, and two overlapping
+        # Dialogue lines in the Flash style render the same text twice.
+        bar_index = max(1, math.ceil((opener + bar - 1e-9) / bar))
+        while bar_index * bar < duration:
+            _draw(bar_index * bar)
+            bar_index += stride
     return flashes
 
 

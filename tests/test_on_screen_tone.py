@@ -205,7 +205,7 @@ class FlashCadenceTests(unittest.TestCase):
 
     def test_default_stride_keeps_prior_art_cadence(self):
         flashes = stock_visual.edit_flash_schedule(9.0)
-        self.assertEqual(len(flashes), 5)  # 4 bar slots + cold open
+        self.assertEqual(len(flashes), 4)  # 3 bar slots + cold open
 
     def test_stride_two_leaves_bars_clear(self):
         flashes = stock_visual.edit_flash_schedule(30.0, bars=2)
