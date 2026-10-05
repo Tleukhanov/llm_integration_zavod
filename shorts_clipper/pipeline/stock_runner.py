@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 from shorts_clipper.captions.generator import burn_subtitles, generate_ass_file
-from shorts_clipper.captions.music import pick_track, should_use_bgm
+from shorts_clipper.captions.music import energetic_offset, pick_track, should_use_bgm
 from shorts_clipper.core.settings import STOCK_MOTIVATION_NICHES, Settings
 from shorts_clipper.pipeline.runner import _refresh_retention_grades
 from shorts_clipper.pipeline.stock_dedup import (
@@ -432,10 +432,21 @@ def run_stock_short(
                     track = pick_track(settings.music_dir, run_seed, last_track)
                     if track is not None:
                         last_track = track
+                        # Skip the track's quiet intro: a produced track opens
+                        # with an atmosphere longer than the clip, so mixing from
+                        # 0 left the first 15s of every short without any music.
+                        try:
+                            bgm_offset = energetic_offset(track, run_seed, render_duration)
+                        except Exception as exc:
+                            log.debug("Energetic BGM offset failed, starting at 0: %s", exc)
+                            bgm_offset = 0.0
+                        if bgm_offset:
+                            log.info("BGM starts at %.1fs into %s", bgm_offset, track.name)
                         bgm_kwargs = {
                             "bgm_audio": track,
                             "bgm_volume": settings.stock_bgm_volume,
                             "bgm_music_forward": True,
+                            "bgm_start_seconds": bgm_offset,
                         }
 
             # 7. Burn subtitles + voice + BGM in one pass.

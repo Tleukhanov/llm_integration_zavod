@@ -205,13 +205,16 @@ class FlashCadenceTests(unittest.TestCase):
 
     def test_default_stride_keeps_prior_art_cadence(self):
         flashes = stock_visual.edit_flash_schedule(9.0)
-        self.assertEqual(len(flashes), 4)
+        self.assertEqual(len(flashes), 5)  # 4 bar slots + cold open
 
     def test_stride_two_leaves_bars_clear(self):
         flashes = stock_visual.edit_flash_schedule(30.0, bars=2)
-        self.assertEqual(len(flashes), 8)
+        # 8 bar-aligned slots + the cold open.
+        self.assertEqual(len(flashes), 9)
         bar = 4 * stock_visual.beat_seconds(132)
-        for flash in flashes:
+        opener, *grid = flashes
+        self.assertAlmostEqual(opener["start"], stock_visual._EDIT_FLASH_OPEN_OFFSET, places=3)
+        for flash in grid:
             self.assertAlmostEqual(
                 flash["start"], round(flash["start"] / bar) * bar, places=3
             )

@@ -602,6 +602,7 @@ def burn_subtitles(
     bgm_audio: str | Path | None = None,
     bgm_volume: float = 0.30,
     bgm_music_forward: bool = False,
+    bgm_start_seconds: float = 0.0,
     ad_card_image: str | Path | None = None,
     ad_card_text: str | None = None,
     ad_card_start: float = 0.0,
@@ -637,8 +638,12 @@ def burn_subtitles(
         bgm_audio:      Optional background-music file mixed under the commentary.
         bgm_volume:     Loudness of the background music (0.0-1.0).
         bgm_music_forward: Music-forward mix for hype/gameplay clips — BGM is
-                        mixed on top of an attenuated bed instead of averaged
-                        under it, so the track is clearly audible.
+                         mixed on top of an attenuated bed instead of averaged
+                         under it, so the track is clearly audible.
+        bgm_start_seconds: Offset into the music file at which the bed starts.
+                         A produced track opens with an intro longer than a
+                         short is, so mixing from 0 spent the entire clip
+                         inside silence. See captions.music.energetic_offset.
         ad_card_image:  Optional big brand image shown as a timed mid-roll card.
         ad_card_text:   Optional CTA text banner shown with the ad card.
         ad_card_start:  Timestamp (seconds) when the mid-roll card appears.
@@ -753,6 +758,11 @@ def burn_subtitles(
         else:
             ad_image_input = None
         if use_bgm:
+            if bgm_start_seconds > 0:
+                # Input seek, before -i: starts the bed at an energetic point
+                # instead of spending the whole clip inside the track's quiet
+                # intro. See captions.music.energetic_offset for the measurement.
+                cmd.extend(["-ss", f"{float(bgm_start_seconds):.3f}"])
             cmd.extend(["-i", str(music)])
             bgm_index = input_idx
             input_idx += 1

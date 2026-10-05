@@ -50,20 +50,26 @@ class RussianFlashTests(unittest.TestCase):
             self.assertNotIn(flash["text"], stock_visual._EDIT_FLASH_PHRASES)
 
     def test_flash_slot_count_unchanged(self):
-        """The cadence work (bars=2) already landed — this only guards slots."""
-        self.assertEqual(len(stock_visual.edit_flash_schedule(9.0, script=MONEY_SCRIPT)), 4)
-        self.assertEqual(len(stock_visual.edit_flash_schedule(30.0, bars=2, script=MONEY_SCRIPT)), 8)
+        """Cadence guard: grid slots plus the one cold-open flash."""
+        # 9.0s  @ bars=1 -> bars 1,2,3,4 = 4 grid + opener
+        self.assertEqual(len(stock_visual.edit_flash_schedule(9.0, script=MONEY_SCRIPT)), 5)
+        # 30.0s @ bars=2 -> bars 2,4,...,16 = 8 grid + opener
+        self.assertEqual(len(stock_visual.edit_flash_schedule(30.0, bars=2, script=MONEY_SCRIPT)), 9)
 
     def test_flash_schedule_timing_unchanged(self):
         flashes = stock_visual.edit_flash_schedule(9.0)
         bar = 4 * stock_visual.beat_seconds(132)
         self.assertTrue(flashes)
+        # The cold open is deliberately off-grid; every later flash rides a bar.
+        opener, *grid = flashes
+        self.assertAlmostEqual(opener["start"], stock_visual._EDIT_FLASH_OPEN_OFFSET, places=3)
         for flash in flashes:
+            self.assertLess(flash["start"], flash["end"])
+            self.assertLessEqual(flash["end"], 9.0)
+        for flash in grid:
             self.assertAlmostEqual(
                 flash["start"], round(flash["start"] / bar) * bar, places=3
             )
-            self.assertLess(flash["start"], flash["end"])
-            self.assertLessEqual(flash["end"], 9.0)
 
     def test_flash_schedule_deterministic(self):
         self.assertEqual(

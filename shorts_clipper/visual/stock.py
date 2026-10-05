@@ -101,6 +101,14 @@ _EDIT_MAX_OFFSET = 4.0
 _EDIT_SOURCE_PAD = 2.0 / _FPS
 # Down-beat flashes wait a beat-and-a-half before the first one lands.
 _EDIT_FLASH_LEAD = 0.3
+# Cold-open hit. Measured across rendered shorts: speech starts at 0.10s, but
+# the first beat-aligned flash used to land at 1.82s (lead_bar=1 at 132BPM), so
+# the first ~1.8s of every clip was a caption over a static frame -- exactly the
+# window in which a viewer decides to leave. The opener fires just after the
+# first word and the beat grid resumes from bar `stride` behind it, so the
+# cadence stays even instead of two flashes 1.4s apart. The flash sits in the
+# upper third and captions at the bottom, so they do not collide.
+_EDIT_FLASH_OPEN_OFFSET = 0.45
 # Last-resort phrases only. The flash is supposed to be said BY the short, so a
 # script's own punchy line wins (see :func:`flash_phrases_from_script`); this
 # bank exists for scripts that yield nothing readable and must never read as
@@ -773,15 +781,26 @@ def edit_flash_schedule(
     rng = random.Random(seed)
     flashes: list[dict] = []
     recent: list[str] = []
-    bar_index = lead_bar
-    while bar_index * bar < duration:
-        start = bar_index * bar
+
+    def _draw(start: float) -> None:
         end = min(duration, start + bar)
+        if end <= start:
+            return
         blocked = set(recent[-_EDIT_FLASH_REPEAT_GUARD:])
         open_pool = [p for p in pool if p not in blocked] or list(pool)
         text = rng.choice(open_pool)
         recent.append(text)
         flashes.append({"start": round(start, 3), "end": round(end, 3), "text": text})
+
+    # Cold open first, then hand back to the beat grid. The opener still needs a
+    # full bar of room, so a sub-bar timeline yields nothing as before.
+    opener = min(_EDIT_FLASH_OPEN_OFFSET, duration)
+    if duration > bar:
+        _draw(opener)
+
+    bar_index = stride
+    while bar_index * bar < duration:
+        _draw(bar_index * bar)
         bar_index += stride
     return flashes
 

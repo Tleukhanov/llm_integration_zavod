@@ -8,6 +8,10 @@ import os
 import random
 import wave
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # numpy stays off the import path of non-scanning renders
+    import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -326,3 +330,98 @@ def track_attribution(track: Path) -> str | None:
             source = line[len("Source:"):].strip().split("?")[0]
             break
     return credit if not source else f"{credit} ({source})"
+
+
+# A short is 13-18s, but a produced track opens with an atmospheric intro far
+# longer than that. Measured on data/music/dark_industrial_loop.wav: the first
+# 5s sit at -41 dBFS, 5-10s at -35, 10-15s at -25, and only reach -9 dBFS after
+# 15s. Since every clip mixed the bed from offset 0, the energetic part of the
+# track we generate was inaudible in the whole duration of the output.
+ENERGY_WINDOW_SECONDS = 1.0
+ENERGY_THRESHOLD_DB = -20.0
+ENERGY_SEARCH_FRACTION = 0.75
+
+
+def _decode_mono_16k(path: Path) -> np.ndarray | None:
+    """Decode *path* to mono 16 kHz float samples, or ``None`` on any failure."""
+    try:
+        import numpy as np
+
+        if path.suffix.lower() == ".wav":
+            with wave.open(str(path), "rb") as w:
+                raw = w.readframes(w.getnframes())
+                ch = w.getnchannels()
+                data = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+                if ch > 1:
+                    data = data.reshape(-1, ch).mean(axis=1)
+                return data
+        import subprocess
+
+        from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+
+        proc = subprocess.run(
+            [ffmpeg_path(), "-v", "quiet", "-i", str(path), "-f", "s16le",
+             "-ac", "1", "-ar", "16000", "-"],
+            capture_output=True,
+            timeout=60,
+        )
+        if not proc.stdout:
+            return None
+        return np.frombuffer(proc.stdout, dtype="<i2").astype(np.float32) / 32768.0
+    except Exception:
+        log.debug("Could not decode %s for energy scan", path, exc_info=True)
+        return None
+
+
+def energetic_offset(
+    path: str | Path,
+    rng: random.Random | None = None,
+    clip_duration: float | None = None,
+) -> float:
+    """Return a start offset into *path* where the track is already loud.
+
+    Picks a deterministic-by-seed 1s window whose RMS clears
+    ``ENERGY_THRESHOLD_DB``, searched within ``ENERGY_SEARCH_FRACTION`` of the
+    track so the choice is reproducible and biased to the front. When
+    *clip_duration* is given, windows that would run past the end of the track
+    are rejected. Falls back to ``0.0`` whenever the track cannot be decoded or
+    nothing is loud enough -- never raises, because a quiet opening is a much
+    smaller problem than a failed render.
+    """
+    path = Path(path)
+    total = track_duration(path)
+    if total is None or total <= 0:
+        return 0.0
+    data = _decode_mono_16k(path)
+    if data is None or not len(data):
+        return 0.0
+
+    sr = 16000
+    win = int(ENERGY_WINDOW_SECONDS * sr)
+    usable = len(data) - win
+    if usable <= 0:
+        return 0.0
+    limit = int(total * ENERGY_SEARCH_FRACTION)
+
+    threshold = 10 ** (ENERGY_THRESHOLD_DB / 20.0)
+    candidates: list[float] = []
+    for start in range(0, usable, win):
+        offset = start / sr
+        if offset >= limit:
+            break
+        if clip_duration and offset + clip_duration > total:
+            continue
+        if float(np_rms(data[start : start + win])) > threshold:
+            candidates.append(round(offset, 3))
+    if not candidates:
+        return 0.0
+    if rng is None:
+        return candidates[0]
+    return rng.choice(candidates)
+
+
+def np_rms(chunk):
+    """RMS of a float array (kept separate so the scan reads cleanly)."""
+    import numpy as np
+
+    return float(np.sqrt(np.mean(np.square(chunk))))

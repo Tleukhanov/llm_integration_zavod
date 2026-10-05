@@ -291,7 +291,13 @@ class StockVisualTests(unittest.TestCase):
             self.assertLess(flash["start"], flash["end"])
             self.assertLessEqual(flash["end"], 9.0)
             self.assertTrue(flash["text"].strip())
-            self.assertAlmostEqual(flash["start"], round(flash["start"] / bar) * bar, places=3)
+        # Only the cold-open flash is off-grid; everything after it rides the bar.
+        opener, *grid = flashes
+        self.assertAlmostEqual(opener["start"], stock_visual._EDIT_FLASH_OPEN_OFFSET, places=3)
+        for flash in grid:
+            self.assertAlmostEqual(
+                flash["start"], round(flash["start"] / bar) * bar, places=3
+            )
         texts = [f["text"] for f in flashes]
         self.assertFalse(
             any(texts[i] == texts[i + 1] for i in range(len(texts) - 1)),
