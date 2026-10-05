@@ -1,12 +1,25 @@
-"""Optional TTS voiceover generation via edge-tts.
+"""Optional TTS voiceover generation.
 
 The voiceover layer adds an original audio track to each clip, making it
-unique and boosting engagement.  edge-tts is treated as an optional
-dependency — if the CLI / package is not installed the module degrades
-gracefully (returns ``None``, logs a warning, never crashes the pipeline).
+unique and boosting engagement.
 
-A module-level lock serialises concurrent synthesisation calls so that
-multiple clip renders sharing the same process do not collide on
+Two engines, picked by ``SHORTS_VO_ENGINE``:
+
+* ``piper`` (default) — local VITS synthesis via ``shorts_clipper.audio.piper_tts``.
+  Licence-free, offline once the model is cached and noticeably more natural
+  than the two Russian edge-tts voices.  Piper emits no word-boundary
+  metadata, so timings are recovered by aligning the generated audio with the
+  already-installed faster-whisper, degrading to a proportional split.
+* ``edge`` (forced) — edge-tts, which streams real ``WordBoundary`` events.
+
+Both engines are optional dependencies: when neither is usable the module
+degrades gracefully (returns ``None``, logs a warning, never crashes the
+pipeline).  Every Piper failure path logs a line and falls back to edge-tts,
+exactly like ``captions.music.ensure_synthesized_track`` degrades, so a TTS
+problem can never take down a render.
+
+A module-level lock serialises concurrent edge-tts synthesisation calls so
+that multiple clip renders sharing the same process do not collide on
 edge-tts internals.
 """
 
@@ -63,6 +76,64 @@ def pick_voice(text: str, configured: str | None = None) -> str:
     return configured
 
 
+def voiceover_engine() -> str:
+    """Return the configured voiceover engine: ``"piper"`` or ``"edge"``.
+
+    ``SHORTS_VO_ENGINE`` (``Settings.vo_engine``) defaults to ``piper``.  Any
+    failure to read settings falls back to the documented default; the Piper
+    path degrades to edge-tts on its own, so the default is always safe.
+    """
+    try:
+        from shorts_clipper.core.settings import Settings
+
+        return Settings.from_env().vo_engine
+    except Exception:
+        return "piper"
+
+
+def transcode_to_wav(src: Path, dest: Path) -> bool:
+    """Normalise *src* into a 48 kHz mono PCM WAV at *dest*.
+
+    Both engines produce audio at different sample rates (Piper medium voices
+    are 22.05 kHz, edge-tts MP3 is decoded at whatever ffmpeg picks), while
+    everything downstream — duration probing, speech-window detection, AMIX —
+    assumes the edge-tts shape.  Returns ``False`` instead of raising so a
+    failed transcode can be treated like any other TTS failure.
+    """
+    try:
+        from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
+
+        convert = subprocess.run(
+            [
+                ffmpeg_path(),
+                "-y",
+                "-i",
+                str(src),
+                "-ar",
+                "48000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
+                str(dest),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception:
+        log.warning("TTS transcode to WAV raised an exception", exc_info=True)
+        return False
+    if convert.returncode != 0 or not Path(dest).is_file():
+        log.warning(
+            "TTS transcode to WAV failed (exit %d): %s",
+            convert.returncode,
+            convert.stderr[-500:],
+        )
+        return False
+    return True
+
+
 def _edge_tts_command() -> list[str]:
     """Return the invokable edge-tts command.
 
@@ -117,14 +188,14 @@ def build_voiceover_text(
     return " ".join(parts)
 
 
-def synthesize_voiceover(
+def _synthesize_edge(
     text: str,
     out_path: Path,
     voice: str | None = None,
     rate: str = "+8%",
     pitch: str | None = None,
 ) -> Path | None:
-    """Synthesise *text* into a WAV file via edge-tts.
+    """Synthesise *text* into a WAV file via the edge-tts CLI.
 
     Uses a module-level lock to serialise concurrent calls.  ``voice`` may be
     ``None`` to auto-select by detected text language.  ``rate`` (speed,
@@ -133,15 +204,9 @@ def synthesize_voiceover(
     output ``Path`` on success or ``None`` if edge-tts is unavailable /
     any error occurs.
     """
-    if not text or not text.strip():
-        return None
-
     if not _edge_tts_available():
         log.warning("edge-tts CLI not found — skipping voiceover synthesis")
         return None
-
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # edge-tts always streams MP3 regardless of the file extension, so write
     # to a temp path first and transcode into a real WAV (downstream duration
@@ -183,33 +248,7 @@ def synthesize_voiceover(
                     result.stderr[:500],
                 )
                 return None
-
-            from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
-
-            convert = subprocess.run(
-                [
-                    ffmpeg_path(),
-                    "-y",
-                    "-i",
-                    str(tmp_media),
-                    "-ar",
-                    "48000",
-                    "-ac",
-                    "1",
-                    "-c:a",
-                    "pcm_s16le",
-                    str(out_path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if convert.returncode != 0 or not out_path.is_file():
-                log.warning(
-                    "TTS transcode to WAV failed (exit %d): %s",
-                    convert.returncode,
-                    convert.stderr[-500:],
-                )
+            if not transcode_to_wav(tmp_media, out_path):
                 return None
             return out_path
     except Exception:
@@ -220,6 +259,70 @@ def synthesize_voiceover(
             tmp_media.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def synthesize_voiceover(
+    text: str,
+    out_path: Path,
+    voice: str | None = None,
+    rate: str = "+8%",
+    pitch: str | None = None,
+) -> Path | None:
+    """Synthesise *text* into a WAV file, returning the path or ``None``.
+
+    Routes to Piper when ``SHORTS_VO_ENGINE`` is ``piper`` (the default) and
+    silently falls back to edge-tts when Piper is unusable.  ``SHORTS_VO_ENGINE=edge``
+    forces edge-tts.  ``rate``/``pitch`` stay meaningful for both engines:
+    edge-tts takes them verbatim, Piper maps ``rate`` onto its (inverted)
+    ``length_scale`` and ignores ``pitch`` because VITS has no pitch control.
+    Returns ``None`` — never raises — when no engine could produce audio.
+    """
+    if not text or not text.strip():
+        return None
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if voiceover_engine() == "piper":
+        path, _boundaries = _synthesize_piper(text, out_path, voice, rate, pitch)
+        if path is not None:
+            return path
+
+    return _synthesize_edge(text, out_path, voice, rate, pitch)
+
+
+def _synthesize_piper(
+    text: str,
+    out_path: Path,
+    voice: str | None = None,
+    rate: str = "+8%",
+    pitch: str | None = None,
+) -> tuple:
+    """Try Piper.  Returns ``(wav_path, word_boundaries)``.
+
+    ``wav_path`` is ``None`` on every failure path (package missing, model not
+    cached, download failed, synthesis raised); ``audio.piper_tts`` logs the
+    specific reason before returning, and this wrapper logs the engine switch
+    so the fallback is visible in the render log.
+    """
+    try:
+        from shorts_clipper.audio.piper_tts import synthesize as piper_synthesize
+
+        path, boundaries = piper_synthesize(
+            text,
+            out_path,
+            voice=voice,
+            rate=rate,
+            pitch=pitch,
+        )
+    except Exception:
+        # A bug in the Piper path must never take down a render.
+        log.warning("Piper voiceover raised an exception — falling back to edge-tts", exc_info=True)
+        return None, []
+    if path is None:
+        log.info("Falling back to edge-tts for this voiceover")
+        return None, []
+    return path, boundaries
 
 
 def _edge_tts_library_available() -> bool:
@@ -306,6 +409,92 @@ def asyncio_run(coro):
             loop.close()
 
 
+def normalize_word_boundaries(boundaries, *, duration: float | None = None) -> list:
+    """Coerce a raw boundary list into the shape the caption path relies on.
+
+    The subtitle builder assumes ``(word, start, end)`` tuples that are sorted
+    by ``start`` with a strictly positive span, all inside the audio —
+    see ``pipeline.stock_runner._segments_from_word_bounds`` and
+    ``tests/test_stock_sync.py::test_boundaries_monotonic``.  Piper alignments,
+    edge-tts ticks and proportional fallbacks can each violate that in
+    different ways, so every engine's output goes through here.
+
+    Returns ``[]`` for an empty/blank input (no synthesised words to time).
+    """
+    cleaned: list = []
+    for item in boundaries or []:
+        try:
+            word, start, end = item
+        except (TypeError, ValueError):
+            continue
+        token = str(word or "").strip()
+        if not token:
+            continue
+        try:
+            start = float(start)
+            end = float(end)
+        except (TypeError, ValueError):
+            continue
+        cleaned.append((token, start, end))
+    if not cleaned:
+        return []
+
+    cleaned.sort(key=lambda item: item[1])
+
+    ceiling = float(duration) if duration is not None and duration > 0.0 else None
+    normalized: list = []
+    floor = 0.0
+    for token, start, end in cleaned:
+        start = max(0.0, start)
+        end = max(start, end)
+        if ceiling is not None:
+            start = min(start, ceiling)
+            end = min(end, ceiling)
+        # Keep starts monotonic and guarantee a non-zero span so a zero-length
+        # or overlapping entry can never produce an inverted ASS \k interval.
+        if start < floor:
+            start = floor
+        if end <= start:
+            end = start + 0.01
+        normalized.append((token, start, end))
+        floor = start
+    return normalized
+
+
+def finalize_word_boundaries(text: str, boundaries, audio_path) -> list:
+    """Return a usable boundary list for *audio_path*, or ``[]`` if impossible.
+
+    Guarantee relied upon by the caption path: when audio exists, the returned
+    list is non-empty, ordered and bounded by the audio length.  *boundaries*
+    is whatever the engine reported (real edge-tts word events, a whisper
+    alignment, or a proportional split); when it is missing or unusable the
+    timings are distributed proportionally over the detected speech window so
+    subtitles still follow the voice.
+
+    Those proportional timings DRIFT: word character count is only a proxy for
+    duration, so punctuation pauses and syllable structure are ignored.
+    """
+    duration = _tts_wav_duration(audio_path) if audio_path is not None else None
+    normalized = normalize_word_boundaries(boundaries, duration=duration)
+    if normalized:
+        return normalized
+    if not duration or duration <= 0.0:
+        return []
+    try:
+        from shorts_clipper.audio.piper_tts import proportional_word_boundaries
+
+        window = speech_window(audio_path)
+        start, end = window if window is not None else (0.0, duration)
+        fallback = proportional_word_boundaries(text, start, end)
+    except Exception:
+        log.warning("Could not derive fallback word timings", exc_info=True)
+        return []
+    normalized = normalize_word_boundaries(fallback, duration=duration)
+    if normalized:
+        log.info("Using proportional word timings for %d words (no engine boundaries)", len(normalized))
+    return normalized
+
+
 def synthesize_voiceover_boundaries(
     text: str,
     out_path: Path,
@@ -315,10 +504,16 @@ def synthesize_voiceover_boundaries(
 ):
     """Synthesise *text* to WAV and return spoken word boundaries.
 
-    Returns ``(wav_path, [(word, start_s, end_s), ...])``.  Falls back to the
-    plain CLI synthesis returning ``(wav_path, [])`` when the library is
-    missing or the stream yields no boundaries; returns ``(None, [])`` on
-    failure.
+    Returns ``(wav_path, [(word, start_s, end_s), ...])``.
+
+    Piper is tried first unless ``SHORTS_VO_ENGINE=edge``.  edge-tts supplies
+    real ``WordBoundary`` events; Piper does not, so its timings come from
+    aligning the generated audio with faster-whisper and, failing that, from a
+    proportional split over the speech window.  Whenever audio was produced
+    the boundary list is non-empty and ordered (see
+    :func:`finalize_word_boundaries`) — subtitle sync depends on it.
+
+    Returns ``(None, [])`` only when no engine could produce audio at all.
     """
     if not text or not text.strip():
         return None, []
@@ -326,16 +521,31 @@ def synthesize_voiceover_boundaries(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if voiceover_engine() == "piper":
+        path, boundaries = _synthesize_piper(text, out_path, voice, rate, pitch)
+        if path is not None:
+            return path, finalize_word_boundaries(text, boundaries, path)
+
+    return _synthesize_edge_boundaries(text, out_path, voice, rate, pitch)
+
+
+def _synthesize_edge_boundaries(
+    text: str,
+    out_path: Path,
+    voice: str | None = None,
+    rate: str = "+8%",
+    pitch: str | None = None,
+) -> tuple:
+    """edge-tts synthesis that captures streamed ``WordBoundary`` metadata."""
     audio, boundaries = (None, [])
     if _edge_tts_library_available():
         audio, boundaries = _synthesize_audio_bytes(text, voice, rate, pitch)
 
     if audio is None or not audio:
-        synth = synthesize_voiceover(text, out_path, voice=voice, rate=rate, pitch=pitch)
-        return (synth, []) if synth else (None, [])
+        synth = _synthesize_edge(text, out_path, voice=voice, rate=rate, pitch=pitch)
+        return (synth, finalize_word_boundaries(text, [], synth)) if synth else (None, [])
 
     import os
-    import subprocess
     import tempfile
 
     fd, tmp_name = tempfile.mkstemp(suffix=".mp3", prefix="edgetts_")
@@ -343,31 +553,10 @@ def synthesize_voiceover_boundaries(
     tmp_media = Path(tmp_name)
     try:
         tmp_media.write_bytes(audio)
-        from shorts_clipper.utils.ffmpeg_path import ffmpeg_path
-
-        convert = subprocess.run(
-            [
-                ffmpeg_path(),
-                "-y",
-                "-i",
-                str(tmp_media),
-                "-ar",
-                "48000",
-                "-ac",
-                "1",
-                "-c:a",
-                "pcm_s16le",
-                str(out_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if convert.returncode != 0 or not out_path.is_file():
-            log.warning("edge_tts transcode to WAV failed (exit %d)", convert.returncode)
-            synth = synthesize_voiceover(text, out_path, voice=voice, rate=rate, pitch=pitch)
-            return (synth, []) if synth else (None, [])
-        return out_path, boundaries
+        if not transcode_to_wav(tmp_media, out_path):
+            synth = _synthesize_edge(text, out_path, voice=voice, rate=rate, pitch=pitch)
+            return (synth, finalize_word_boundaries(text, [], synth)) if synth else (None, [])
+        return out_path, finalize_word_boundaries(text, boundaries, out_path)
     finally:
         try:
             tmp_media.unlink(missing_ok=True)

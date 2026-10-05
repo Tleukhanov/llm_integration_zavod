@@ -139,6 +139,8 @@ class Settings:
     vo_voice: str = "en-US-GuyNeural"
     vo_rate: str = "+8%"
     vo_pitch: str = ""  # edge-tts pitch arg, e.g. "+4Hz" — less robotic voice
+    vo_engine: str = "piper"  # "piper" (local VITS, default) | "edge" (edge-tts)
+    vo_piper_model: str = ""  # empty = auto-pick by text language, e.g. ru_RU-irina-medium
     channel_name: str | None = None
     channel_creds_dir: str = "data/creds"
     metrics_path: Path = Path("data/metrics.sqlite")
@@ -169,6 +171,15 @@ class Settings:
         if self.channel_name:
             return Path(self.channel_creds_dir) / self.channel_name
         return Path(".cache/shorts-clipper")
+
+    @property
+    def piper_model_dir(self) -> Path:
+        """Cache dir for Piper ONNX voices.
+
+        Always nested under ``models_dir`` so the multi-hundred-megabyte models
+        land in the gitignored models directory and never in the repo root.
+        """
+        return Path(self.models_dir) / "piper"
 
     @classmethod
     def from_env(cls, env_path: str | Path = ".env") -> Settings:
@@ -520,6 +531,15 @@ class Settings:
         bgm_default = "mix50" if is_stock else "off"
         bgm_mode_raw = (_env("SHORTS_BGM_MODE", file_values, bgm_default) or bgm_default).lower()
 
+        # Voiceover engine: "piper" (local VITS, primary) or "edge" (edge-tts).
+        # Anything else coerces to the primary engine, whose own failure paths
+        # degrade to edge-tts anyway, so an unknown value can never mute a run.
+        vo_engine_raw = (_env("SHORTS_VO_ENGINE", file_values, "piper") or "piper").strip().lower()
+        vo_engine = "edge" if vo_engine_raw in {"edge", "edge-tts", "edgetts"} else "piper"
+        vo_piper_model = (
+            _env("SHORTS_VO_PIPER_MODEL", file_values, "") or ""
+        ).strip()
+
         music_tags_raw = _env("SHORTS_MUSIC_TAGS", file_values, ",".join(DEFAULT_MUSIC_TAGS)) or ""
         music_tags = [t.strip() for t in music_tags_raw.split(",") if t.strip()]
         if not music_tags:
@@ -643,6 +663,8 @@ class Settings:
             or "en-US-GuyNeural",
             vo_rate=_env("SHORTS_VO_RATE", file_values, "+8%") or "+8%",
             vo_pitch=_env("SHORTS_VO_PITCH", file_values) or "",
+            vo_engine=vo_engine,
+            vo_piper_model=vo_piper_model,
             channel_name=channel,
             channel_creds_dir=_env("SHORTS_CHANNEL_CREDS_DIR", file_values, "data/creds")
             or "data/creds",

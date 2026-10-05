@@ -100,6 +100,38 @@ def _disk_free_target(path: Path) -> Path:
     return next((parent for parent in path.parents if parent.exists()), Path.cwd())
 
 
+def _check_voiceover(settings: Settings) -> None:
+    """Report which TTS engine will actually run, and whether it is ready.
+
+    Never critical: a missing Piper install or voice just means the render
+    falls back to edge-tts, so this only ever prints [WARN]/[INFO] lines.
+    """
+    from shorts_clipper.audio import piper_tts
+
+    if settings.vo_engine != "piper":
+        _check(True, "Voiceover engine: edge-tts (SHORTS_VO_ENGINE=edge)")
+        return
+
+    from shorts_clipper.audio.tts import _edge_tts_library_available
+
+    fallback = "edge-tts library ready" if _edge_tts_library_available() else "no edge-tts"
+    if not piper_tts.piper_installed():
+        _warn(
+            "Voiceover engine: piper (NOT installed)",
+            f"pip install piper-tts - falling back to {fallback}",
+        )
+        return
+    model = settings.vo_piper_model or piper_tts.DEFAULT_PIPER_MODEL
+    if piper_tts.model_present(model):
+        _check(True, f"Voiceover engine: piper ({model}, cached)")
+    else:
+        _warn(
+            f"Voiceover engine: piper ({model} not cached)",
+            f"downloads to {settings.piper_model_dir} on first use "
+            f"(needs network once) - falling back to {fallback} if that fails",
+        )
+
+
 def run_doctor(settings: Settings) -> int:
     critical_fail = False
 
@@ -136,6 +168,8 @@ def run_doctor(settings: Settings) -> int:
             f"Whisper model dir {models_dir}",
             "does not exist yet - will download on first use",
         )
+
+    _check_voiceover(settings)
 
     if settings.gemini_api_key:
         _check(True, "Gemini API key (GEMINI_API_KEY)")

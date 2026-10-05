@@ -7,6 +7,11 @@ __pycache__/
 *.webm
 *.m4a
 models/
+# Piper TTS voice cache (SHORTS_MODELS_DIR/piper by default, already covered by
+# models/ above; the .onnx rules also cover a relocated SHORTS_MODELS_DIR).
+models/piper/
+*.onnx
+*.onnx.json
 outputs/
 .cache/
 data/*
